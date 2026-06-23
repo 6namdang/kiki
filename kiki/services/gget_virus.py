@@ -6,7 +6,6 @@ from typing import Any
 
 import gget
 
-from kiki.config import DEFAULT_OUTPUT_ROOT
 from kiki.errors import ErrorCode, KikiError
 from kiki.query.validate import validate_filters
 from kiki.services.command_summary import parse_command_summary

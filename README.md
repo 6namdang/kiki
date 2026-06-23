@@ -1,6 +1,6 @@
 # Kiki
 
-MCP server for **deterministic biological data retrieval** — NCBI Virus (via gget), Ensembl (via gget seq/search/info/ref), and UniProt (via REST API).
+MCP server for **deterministic biological data retrieval** — NCBI Virus (via gget), NCBI nucleotide/assembly (E-utilities), Ensembl (direct REST + pinned SQL), and UniProt (REST API).
 
 Agents call Kiki tools to query metadata, count records, retrieve datasets, or map identifiers. Every successful response uses a **QueryManifest** envelope with a deterministic `query_id`, structured `result`, and `provenance` block. Errors return stable machine-readable codes.
 
@@ -70,24 +70,30 @@ kiki serve --transport stdio
 
 ## Tools reference
 
-Kiki exposes **14 tools** across three data sources. Use the safe query/count tools for exploration; use dataset tools only when you intend to write files to disk.
+Kiki exposes **20 tools** across five data domains. Use the safe query/count tools for exploration; use dataset tools only when you intend to write files to disk.
 
 | # | Tool | Source | Purpose | Writes files? |
 |---|------|--------|---------|---------------|
 | 1 | [`get_virus_metadata`](#1-get_virus_metadata) | NCBI Virus / gget | Paginated metadata search + inline preview | No |
 | 2 | [`count_virus_sequences`](#2-count_virus_sequences) | NCBI Virus / gget | Count metadata records | No |
-| 3 | [`retrieve_virus_dataset`](#3-retrieve_virus_dataset) | NCBI Virus / gget | Full sequence dataset (FASTA/CSV/JSONL) | **Yes** |
-| 4 | [`get_sequence`](#4-get_sequence) | Ensembl / gget | Single gene/transcript FASTA | No |
-| 5 | [`retrieve_sequence_batch`](#5-retrieve_sequence_batch) | Ensembl / gget | Multi-ID sequence fetch (+ optional FASTA file) | Optional |
-| 6 | [`search_genes`](#6-search_genes) | Ensembl / gget | Gene search by text terms | No |
-| 7 | [`get_gene_info`](#7-get_gene_info) | Ensembl / gget | Gene/transcript metadata + cross-refs | No |
-| 8 | [`get_reference`](#8-get_reference) | Ensembl / gget | Reference genome FTP metadata | No |
-| 9 | [`search_proteins`](#9-search_proteins) | UniProt REST | Paginated protein search + inline preview | No |
-| 10 | [`count_proteins`](#10-count_proteins) | UniProt REST | Count matching proteins | No |
-| 11 | [`get_protein`](#11-get_protein) | UniProt REST | Single accession lookup | No |
-| 12 | [`retrieve_protein_dataset`](#12-retrieve_protein_dataset) | UniProt REST | Bulk FASTA download | **Yes** |
-| 13 | [`map_protein_ids`](#13-map_protein_ids) | UniProt REST | Cross-database ID mapping | No |
-| 14 | [`get_query_history`](#14-get_query_history) | Kiki audit log | Inspect prior QueryManifest runs | No |
+| 3 | [`retrieve_virus_dataset`](#3-retrieve_virus_dataset) | NCBI Virus / gget | Full viral genome dataset (FASTA/CSV/JSONL) | **Yes** |
+| 4 | [`get_nucleotide_sequence`](#4-get_nucleotide_sequence) | NCBI E-utilities | Single accession FASTA (GenBank/RefSeq) | No |
+| 5 | [`get_nucleotide_metadata`](#5-get_nucleotide_metadata) | NCBI E-utilities | Nucleotide record summary | No |
+| 6 | [`get_assembly_metadata`](#6-get_assembly_metadata) | NCBI E-utilities | Genome assembly (GCF/GCA) metadata | No |
+| 7 | [`retrieve_nucleotide_batch`](#7-retrieve_nucleotide_batch) | NCBI E-utilities | Multi-accession FASTA (+ optional file) | Optional |
+| 8 | [`submit_blast_search`](#8-submit_blast_search) | NCBI BLAST URL API | Submit blastn/blastp search → RID | No |
+| 9 | [`get_blast_results`](#9-get_blast_results) | NCBI BLAST URL API | Poll once for structured hits | No |
+| 10 | [`get_sequence`](#10-get_sequence) | Ensembl REST | Single gene/transcript FASTA | No |
+| 11 | [`retrieve_sequence_batch`](#11-retrieve_sequence_batch) | Ensembl REST | Multi-ID sequence fetch (+ optional FASTA file) | Optional |
+| 12 | [`search_genes`](#12-search_genes) | Ensembl SQL | Gene search by text terms | No |
+| 13 | [`get_gene_info`](#13-get_gene_info) | Ensembl REST | Gene/transcript metadata | No |
+| 14 | [`get_reference`](#14-get_reference) | Ensembl FTP | Reference genome FTP metadata | No |
+| 15 | [`search_proteins`](#15-search_proteins) | UniProt REST | Paginated protein search + inline preview | No |
+| 16 | [`count_proteins`](#16-count_proteins) | UniProt REST | Count matching proteins | No |
+| 17 | [`get_protein`](#17-get_protein) | UniProt REST | Single accession lookup | No |
+| 18 | [`retrieve_protein_dataset`](#18-retrieve_protein_dataset) | UniProt REST | Bulk FASTA download | **Yes** |
+| 19 | [`map_protein_ids`](#19-map_protein_ids) | UniProt REST | Cross-database ID mapping | No |
+| 20 | [`get_query_history`](#20-get_query_history) | Kiki audit log | Inspect prior QueryManifest runs | No |
 
 ### Shared behavior
 
@@ -116,7 +122,9 @@ Kiki exposes **14 tools** across three data sources. Use the safe query/count to
 | `KIKI_OUTPUT_DIR` | Override default download directory (auto-fallback to `/tmp/kiki_output` if not writable) |
 | `KIKI_AUDIT_DIR` | Override manifest audit log directory (default: `./kiki_audit`, auto-fallback to `/tmp/kiki_audit` if not writable) |
 | `KIKI_RECORD_HISTORY` | Set to `false` to disable audit log writes (default: `true`) |
-| `NCBI_API_KEY` | Forwarded to gget for NCBI Virus tools |
+| `KIKI_ENSEMBL_RELEASE` | Pinned Ensembl release for all Ensembl tools (default `114`) |
+| `NCBI_API_KEY` | Optional — forwarded to gget (virus) and NCBI BLAST URL API |
+| `NCBI_BLAST_EMAIL` | Optional contact email for NCBI BLAST (`tool=kiki-mcp` is always sent) |
 
 On read-only hosted runtimes (e.g. Horizon), audit logs and dataset downloads automatically fall back to `/tmp/kiki_audit` and `/tmp/kiki_output`. Tool calls never fail solely because audit logging failed.
 
@@ -331,11 +339,113 @@ With preset:
 
 ---
 
-## Ensembl tools (gget seq / search / info / ref)
+## NCBI genome / nucleotide tools (E-utilities)
 
-Gene and reference genome retrieval via [gget](https://github.com/pachterlab/gget) against the Ensembl REST API. Sequences are returned inline as parsed FASTA records (`header`, `sequence`, `length`).
+Inspired by the [Anthropic biology agents blog](blog.md): agents need a **deterministic layer** instead of gluing together E-utilities by hand. These tools wrap NCBI E-utilities for **direct accession lookups** — the safest starting point for genome sequencing records.
 
-### 4. `get_sequence`
+Use **virus tools** above when you need NCBI Virus portal filters (taxon, host, geography, collection dates). Use **nucleotide tools** here for known accessions or reference assemblies.
+
+### 4. `get_nucleotide_sequence`
+
+Fetch one GenBank/RefSeq nucleotide record as parsed FASTA via `efetch`.
+
+**Example**
+
+```json
+{ "accession": "NC_045512.2" }
+```
+
+**Result fields:** `returned`, `records[]` (`header`, `sequence`, `length`)
+
+---
+
+### 5. `get_nucleotide_metadata`
+
+Record summary (title, length, organism, taxid) without downloading sequence.
+
+**Example**
+
+```json
+{ "accession": "NC_045512.2" }
+```
+
+---
+
+### 6. `get_assembly_metadata`
+
+Genome assembly metadata for GCF/GCA accessions (name, taxid, FTP path).
+
+**Example**
+
+```json
+{ "accession": "GCF_000001405.40" }
+```
+
+---
+
+### 7. `retrieve_nucleotide_batch`
+
+Fetch up to 50 accessions inline. Pass `confirm_download=true` to write `sequences.fasta` to disk.
+
+**Example**
+
+```json
+{ "accessions": ["NC_045512.2"] }
+```
+
+---
+
+## NCBI BLAST tools (URL API)
+
+Two-step sequence similarity search via the [NCBI BLAST Common URL API](https://blast.ncbi.nlm.nih.gov/doc/blast-help/urlapi.html). Agents submit a search, wait, then poll for structured JSON2 hits — no browser or hand-rolled E-utilities glue.
+
+**v1 databases (curated allowlist):** `core_nt`, `refseq_rna` (blastn); `swissprot`, `refseq_protein` (blastp). `nt` and `nr` are excluded to avoid timeouts and partial results on large DBs.
+
+**Agent workflow**
+
+1. `submit_blast_search` → save `rid`
+2. Wait `retry_after_seconds` (≥60s per NCBI policy)
+3. `get_blast_results` → if `status: "running"`, wait and retry
+4. When `status: "ready"`, use `hits[]` (accession, e-value, identity, alignment coords)
+
+RIDs expire in ~24 hours. Kiki records each call in the audit manifest but does not persist RIDs. Hit lists may drift when NCBI updates database builds.
+
+### 8. `submit_blast_search`
+
+**Example (blastn vs core_nt)**
+
+```json
+{
+  "program": "blastn",
+  "query": "NC_045512.2",
+  "database": "core_nt",
+  "hitlist_size": 25
+}
+```
+
+**Result fields:** `rid`, `rtoe_seconds`, `retry_after_seconds`, `program`, `database`, `query_type`
+
+---
+
+### 9. `get_blast_results`
+
+**Example**
+
+```json
+{ "rid": "ABCDEF12" }
+```
+
+**Result fields:** `status` (`running` \| `ready` \| `failed`), `hits[]`, `num_hits`, `search_stats`, `retry_after_seconds` (when running)
+
+---
+
+## Ensembl tools (pinned release)
+
+Gene and reference genome retrieval via **direct Ensembl APIs** — REST (`e{release}.rest.ensembl.org`), public SQL search, and deterministic FTP URLs. All tools default to **`KIKI_ENSEMBL_RELEASE`** (default `114`) so the same inputs return the same results against that release snapshot.
+
+Pass `release` explicitly to override. Sequences are returned inline as parsed FASTA records (`header`, `sequence`, `length`).
+
+### 10. `get_sequence`
 
 Fetch one Ensembl gene or transcript ID. Set `translate=true` for amino acid sequences; `isoforms=true` for all transcript isoforms of a gene.
 
@@ -353,7 +463,7 @@ Transcript with protein sequence:
 
 ---
 
-### 5. `retrieve_sequence_batch`
+### 11. `retrieve_sequence_batch`
 
 Fetch multiple Ensembl IDs in one call (max 50). Returns inline FASTA records. Pass `confirm_download=true` to also write `sequences.fasta` to disk.
 
@@ -368,7 +478,7 @@ Fetch multiple Ensembl IDs in one call (max 50). Returns inline FASTA records. P
 
 ---
 
-### 6. `search_genes`
+### 12. `search_genes`
 
 Search Ensembl by free-text terms. `species` uses `genus_species` format (e.g. `homo_sapiens`).
 
@@ -386,9 +496,9 @@ Multi-term OR search:
 
 ---
 
-### 7. `get_gene_info`
+### 13. `get_gene_info`
 
-Metadata and cross-references (Ensembl, NCBI, UniProt, optional PDB) for one or more Ensembl IDs.
+Metadata for one or more Ensembl IDs from Ensembl REST lookup (pinned release).
 
 **Example**
 
@@ -398,7 +508,7 @@ Metadata and cross-references (Ensembl, NCBI, UniProt, optional PDB) for one or 
 
 ---
 
-### 8. `get_reference`
+### 14. `get_reference`
 
 Reference genome annotation FTP links (GTF, cDNA, DNA, etc.) — metadata only, no download.
 
@@ -420,7 +530,7 @@ List available species:
 
 Powered by the [UniProt REST API](https://rest.uniprot.org). All search/count/dataset tools default to **`reviewed:true`** (Swiss-Prot). Pass `"include_unreviewed": true` to include TrEMBL. Large organisms (e.g. human `9606`) require narrowing filters for dataset downloads.
 
-### 9. `search_proteins`
+### 15. `search_proteins`
 
 Search UniProtKB with cursor pagination. Returns up to `preview_limit` summarized records inline plus `total_available`. **Does not download sequences.**
 
@@ -466,7 +576,7 @@ With preset:
 
 ---
 
-### 10. `count_proteins`
+### 16. `count_proteins`
 
 Count UniProtKB entries via `X-Total-Results` (single API request). Same filters as `search_proteins`.
 
@@ -484,7 +594,7 @@ Count UniProtKB entries via `X-Total-Results` (single API request). Same filters
 
 ---
 
-### 11. `get_protein`
+### 17. `get_protein`
 
 Retrieve a single UniProtKB entry by accession. No search filters needed.
 
@@ -514,7 +624,7 @@ Raw FASTA:
 
 ---
 
-### 12. `retrieve_protein_dataset`
+### 18. `retrieve_protein_dataset`
 
 Download all matching protein sequences as FASTA to disk. Paginates through every result page. **Requires `confirm_download: true`.**
 
@@ -553,7 +663,7 @@ Download all matching protein sequences as FASTA to disk. Paginates through ever
 
 ---
 
-### 13. `map_protein_ids`
+### 19. `map_protein_ids`
 
 Map protein identifiers across databases via the UniProt ID mapping service.
 
@@ -590,7 +700,7 @@ List supported databases:
 
 ---
 
-### 14. `get_query_history`
+### 20. `get_query_history`
 
 Inspect prior tool runs stored in the local audit log (`KIKI_AUDIT_DIR/manifest_history.jsonl`). Every successful tool call is recorded with its full QueryManifest so agents can verify *how* a result was produced.
 
@@ -633,7 +743,21 @@ List recent virus counts:
 
 ---
 
-## Call tools from Python
+## VirBench public subset (accuracy proof)
+
+Inspired by the [Anthropic biology agents blog](blog.md) and VirBench (Nasri et al., 2026). Kiki ships a **public query subset** with ground-truth counts (including the blog Ebola example, expected **266**).
+
+```bash
+# Safe smoke benchmark (4 queries × 3 runs) — runs in pytest too
+python -m kiki.benchmark --safe-only
+
+# Optional: blog dataset query (downloads sequences, slow)
+KIKI_RUN_INTEGRATION_BENCHMARK=1 pytest tests/test_virbench_subset.py -m integration
+```
+
+Reports: `kiki_output/virbench/*.json` and `*.md`. See [kiki/benchmark/README.md](kiki/benchmark/README.md).
+
+---
 
 ```bash
 # Terminal 1
@@ -654,7 +778,7 @@ async def main():
     async with client:
         tools = await client.list_tools()
         print([t.name for t in tools])
-        # All 14 tools:
+        # All 20 tools:
         # get_virus_metadata, count_virus_sequences, retrieve_virus_dataset,
         # get_sequence, retrieve_sequence_batch, search_genes, get_gene_info, get_reference,
         # search_proteins, count_proteins, get_protein,
@@ -694,7 +818,7 @@ fastmcp inspect server.py:mcp
 3. Set entrypoint `server.py:mcp`, deploy
 4. URL: `https://YOUR-SERVER-NAME.fastmcp.app/mcp`
 
-**Safe tools for hosted testing:** `get_virus_metadata`, `count_virus_sequences`, `search_genes`, `get_gene_info`, `get_sequence`, `get_reference`, `search_proteins`, `count_proteins`, `get_protein`, `map_protein_ids`
+**Safe tools for hosted testing:** `get_virus_metadata`, `count_virus_sequences`, `get_nucleotide_sequence`, `get_nucleotide_metadata`, `get_assembly_metadata`, `search_genes`, `get_gene_info`, `get_sequence`, `get_reference`, `search_proteins`, `count_proteins`, `get_protein`, `map_protein_ids`
 
 **Dataset tools** (`retrieve_virus_dataset`, `retrieve_protein_dataset`) write to the container filesystem — prefer local/self-hosted runs unless you add persistent storage.
 

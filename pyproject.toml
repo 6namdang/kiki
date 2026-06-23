@@ -9,11 +9,13 @@ authors = [{ name = "Hoang Dang" }]
 dependencies = [
     "fastmcp>=3.4.2",
     "gget>=0.30.7",
+    "mysql-connector-python>=9.0",
     "requests>=2.34.2",
 ]
 
 [project.scripts]
 kiki = "kiki.cli:main"
+kiki-benchmark = "kiki.benchmark.__main__:main"
 
 [project.optional-dependencies]
 dev = [
@@ -31,3 +33,6 @@ packages = ["kiki"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "integration: live API benchmark queries (slow; opt-in)",
+]

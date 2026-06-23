@@ -30,6 +30,8 @@ def my_tool(query: str | None = None, ...) -> dict:
 
 - Register in `register_*_tools(mcp)` and wire in `kiki/tools/__init__.py`
 - Virus tools: `build_query_params`, `extract_filters`, `success_manifest`
+- Genome tools: `genome_success_manifest` (`kiki/tools/genome/_helpers.py`)
+- BLAST tools: `blast_success_manifest` (`kiki/tools/blast/_helpers.py`)
 - UniProt tools: `build_uniprot_params`, `uniprot_success_manifest`
 - Do not call gget/requests directly from tools — use `kiki/services/`
 - Document new tools in `README.md` with example JSON args

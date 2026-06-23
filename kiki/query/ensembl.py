@@ -2,8 +2,21 @@
 
 from __future__ import annotations
 
-from kiki.config import ENSEMBL_MAX_BATCH_SIZE, ENSEMBL_MAX_SEARCH_LIMIT
+from kiki.config import ENSEMBL_DEFAULT_RELEASE, ENSEMBL_MAX_BATCH_SIZE, ENSEMBL_MAX_SEARCH_LIMIT
 from kiki.errors import ErrorCode, KikiError
+
+
+def resolve_ensembl_release(release: int | None) -> int:
+    """Return pinned Ensembl release (default from config when omitted)."""
+    if release is None:
+        return ENSEMBL_DEFAULT_RELEASE
+    if release < 1:
+        raise KikiError(
+            ErrorCode.INVALID_PARAMETER,
+            "release must be a positive Ensembl release number.",
+            details={"release": release},
+        )
+    return release
 
 
 def validate_batch_size(ensembl_ids: list[str]) -> None:

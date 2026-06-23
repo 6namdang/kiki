@@ -22,7 +22,27 @@ Network calls, pagination, file output, command_summary parsing. **No FastMCP im
 - Search pagination via `Link: rel="next"` cursor headers
 - ID mapping: run → poll status → results (handle status payload variants)
 
-## Writable paths
+## Ensembl
+
+- Direct client: `kiki/services/ensembl.py` (REST + pinned public SQL + FTP URLs)
+- Always resolve release via `resolve_ensembl_release()` — default `KIKI_ENSEMBL_RELEASE` (114)
+- Archived REST host: `https://e{release}.rest.ensembl.org` — per-ID GET lookups (no batch POST)
+- Search uses Ensembl public MySQL against the pinned release core database
+
+## NCBI E-utilities (genome / nucleotide)
+
+- Client: `kiki/services/ncbi_eutils.py` — `efetch`, `esummary`, assembly `esearch`+`esummary`
+- Direct accession path for GenBank/RefSeq (`NC_*`, etc.) and GCF/GCA assemblies
+- Enforce `NCBI_EUTILS_MIN_INTERVAL` (default 0.34s) between requests; optional `NCBI_API_KEY` for higher limits
+- Filtered viral taxon queries remain on gget virus tools
+
+## NCBI BLAST (URL API)
+
+- Client: `kiki/services/ncbi_blast.py` — `CMD=Put` submit, `CMD=Get` status + JSON2 results
+- Two MCP tools: `submit_blast_search`, `get_blast_results` (poll once per call)
+- v1 allowlist: `core_nt`, `refseq_rna`, `swissprot`, `refseq_protein` — not `nt`/`nr`
+- Enforce `NCBI_BLAST_MIN_INTERVAL` (default 3s); optional `NCBI_API_KEY`, `NCBI_BLAST_EMAIL`
+- 50 KB inline FASTA cap; RIDs ephemeral (~24h) — document in tool docstrings
 
 Use `resolve_writable_dir()` / `output_root()` — hosted `/app` is read-only; fallback `/tmp/kiki_*`.
 

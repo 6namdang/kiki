@@ -2,7 +2,7 @@ import pytest
 
 from kiki.errors import ErrorCode, KikiError
 from kiki.query.ensembl import validate_andor, validate_batch_size, validate_id_type, validate_search_limit
-from kiki.services.gget_ensembl import parse_fasta_blocks
+from kiki.services.ensembl import parse_fasta_blocks
 
 
 def test_parse_fasta_blocks() -> None:
@@ -17,6 +17,14 @@ def test_parse_fasta_blocks() -> None:
     assert records[0]["sequence"] == "ATCGGCTA"
     assert records[0]["length"] == 8
     assert records[1]["sequence"] == "AA"
+
+
+def test_resolve_ensembl_release_default() -> None:
+    from kiki.config import ENSEMBL_DEFAULT_RELEASE
+    from kiki.query.ensembl import resolve_ensembl_release
+
+    assert resolve_ensembl_release(None) == ENSEMBL_DEFAULT_RELEASE
+    assert resolve_ensembl_release(115) == 115
 
 
 def test_validate_batch_size_rejects_large_batches() -> None:

@@ -3,6 +3,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from kiki import __version__ as kiki_version
+from kiki.config import ENSEMBL_DEFAULT_RELEASE
 from kiki.query.normalize import compute_query_id, normalize_query_params
 
 
@@ -44,6 +45,13 @@ def build_provenance(
 ) -> dict[str, Any]:
     if "gget" in engine:
         engine_version = _package_version("gget")
+    elif engine.startswith("ensembl"):
+        release = params.get("release")
+        engine_version = f"release-{release}" if release is not None else f"release-{ENSEMBL_DEFAULT_RELEASE}"
+    elif engine.startswith("ncbi.blast"):
+        engine_version = "blast.ncbi.nlm.nih.gov/urlapi"
+    elif engine.startswith("ncbi.eutils"):
+        engine_version = "eutils.ncbi.nlm.nih.gov"
     elif engine.startswith("uniprot"):
         engine_version = "rest.uniprot.org"
     else:

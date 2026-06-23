@@ -5,7 +5,8 @@ This repo builds **Kiki** — an MCP server for deterministic biological data re
 ## Read first
 
 - `CONTRIBUTING.md` — collaboration rules (required)
-- `README.md` — all 9 MCP tools and example payloads
+- `README.md` — all MCP tools and example payloads
+- `blog.md` — deterministic retrieval rationale (VirBench / gget virus)
 - `gget_virus_docs.md` — full gget.virus parameter reference
 
 ## Quick constraints
@@ -21,7 +22,7 @@ This repo builds **Kiki** — an MCP server for deterministic biological data re
 
 ```
 kiki/tools/       MCP tools
-kiki/services/    gget (virus + ensembl) + UniProt clients
+kiki/services/    gget (virus) + ncbi eutils (genome) + ncbi blast + ensembl REST/SQL + UniProt
 kiki/query/       presets, validate, normalize
 kiki/audit/       provenance, history, deferred filter explanations
 server.py         Horizon deploy entrypoint

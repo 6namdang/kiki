@@ -80,6 +80,8 @@ Large taxa / organisms require narrowing filters. Use `validate_query_scope()` (
 ### 6. Safe defaults for testing and docs
 
 - Virus smoke tests: accession `NC_045512.2` or presets like `sars_cov2_ref_genome`.
+- NCBI genome smoke tests: `get_nucleotide_sequence` / `get_nucleotide_metadata` on `NC_045512.2`; `get_assembly_metadata` on `GCF_000001405.40`.
+- NCBI BLAST: unit tests + mocked validation; live submit marked `@pytest.mark.integration` (slow).
 - Do **not** add integration tests that download multi-GB datasets without maintainer approval.
 - Do **not** commit secrets (`.env`, API keys, VirBench private CSVs).
 
@@ -158,6 +160,7 @@ Test layout mirrors domains: `test_filters.py`, `test_uniprot_*.py`, `test_audit
 | `KIKI_OUTPUT_DIR` | Dataset download root (fallback: `/tmp/kiki_output`) |
 | `KIKI_AUDIT_DIR` | Manifest audit log (fallback: `/tmp/kiki_audit`) |
 | `KIKI_RECORD_HISTORY` | Set `false` to disable audit writes |
+| `KIKI_ENSEMBL_RELEASE` | Pinned Ensembl release for Ensembl tools (default `114`) |
 | `NCBI_API_KEY` | Optional, forwarded to gget |
 
 Document new env vars in `README.md` and `kiki/config.py`.

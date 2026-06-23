@@ -1,11 +1,16 @@
-from kiki.services.gget_ensembl import (
-    fetch_gene_info,
+from kiki.query.ensembl import (
+    resolve_ensembl_release,
+    validate_andor,
+    validate_id_type,
+    validate_search_limit,
+)
+from kiki.services.ensembl import (
+    fetch_gene_info as ensembl_fetch_gene_info,
     normalize_ensembl_ids,
-    search_genes as gget_search_genes,
+    search_genes as ensembl_search_genes,
 )
 from kiki.tools._errors import tool_safe
 from kiki.tools.ensembl._helpers import ensembl_success_manifest
-from kiki.query.ensembl import validate_andor, validate_id_type, validate_search_limit
 
 
 def register_ensembl_lookup_tools(mcp) -> None:
@@ -20,14 +25,18 @@ def register_ensembl_lookup_tools(mcp) -> None:
         limit: int = 20,
         release: int | None = None,
     ) -> dict:
-        """Search Ensembl genes/transcripts by free-text terms via gget.search.
+        """Search Ensembl genes/transcripts by free-text terms.
 
-        species uses genus_species format (e.g. homo_sapiens). Returns structured JSON
-        records with ensembl_id, gene_name, description, and Ensembl URL.
+        Queries Ensembl public SQL for the pinned release (default KIKI_ENSEMBL_RELEASE).
+        species uses genus_species format (e.g. homo_sapiens).
         """
+        if seqtype is not None:
+            pass  # deprecated gget alias; ignored
+
         id_type = validate_id_type(id_type)
         andor = validate_andor(andor)
         limit = validate_search_limit(limit)
+        ens_release = resolve_ensembl_release(release)
 
         params = {
             "searchwords": searchwords,
@@ -35,20 +44,16 @@ def register_ensembl_lookup_tools(mcp) -> None:
             "id_type": id_type,
             "andor": andor,
             "limit": limit,
+            "release": ens_release,
         }
-        if seqtype is not None:
-            params["seqtype"] = seqtype
-        if release is not None:
-            params["release"] = release
 
-        result = gget_search_genes(
+        result = ensembl_search_genes(
             searchwords,
             species,
             id_type=id_type,
-            seqtype=seqtype,
             andor=andor,
             limit=limit,
-            release=release,
+            release=ens_release,
         )
 
         terms = searchwords if isinstance(searchwords, list) else [searchwords]
@@ -58,29 +63,35 @@ def register_ensembl_lookup_tools(mcp) -> None:
             query_type="ensembl_search",
             query_value={"searchwords": terms, "species": species.strip()},
             result=result,
-            engine="gget.search",
+            engine="ensembl.sql",
             operation="gene_search",
-            message=f"Found {result['returned']} Ensembl match(es) for {species}.",
+            message=(
+                f"Found {result['returned']} Ensembl match(es) for {species} "
+                f"(release {ens_release})."
+            ),
         )
 
     @mcp.tool()
     @tool_safe
     def get_gene_info(
         ensembl_id: str | list[str],
+        release: int | None = None,
         ncbi: bool = True,
         uniprot: bool = True,
         pdb: bool = False,
         ensembl_only: bool = False,
         expand: bool = False,
     ) -> dict:
-        """Fetch gene/transcript metadata for Ensembl IDs via gget.info.
+        """Fetch gene/transcript metadata for Ensembl IDs via Ensembl REST lookup.
 
-        Returns Ensembl, NCBI, UniProt, and optional PDB cross-references inline.
-        Pass a list of IDs to look up multiple genes in one call.
+        Core metadata is fetched from the pinned Ensembl release. Optional NCBI/UniProt/PDB
+        cross-refs are reserved for a future release of this tool.
         """
         ids = normalize_ensembl_ids(ensembl_id)
+        ens_release = resolve_ensembl_release(release)
         params = {
             "ensembl_id": ids if len(ids) > 1 else ids[0],
+            "release": ens_release,
             "ncbi": ncbi,
             "uniprot": uniprot,
             "pdb": pdb,
@@ -88,8 +99,9 @@ def register_ensembl_lookup_tools(mcp) -> None:
             "expand": expand,
         }
 
-        result = fetch_gene_info(
+        result = ensembl_fetch_gene_info(
             ids,
+            release=ens_release,
             ncbi=ncbi,
             uniprot=uniprot,
             pdb=pdb,
@@ -103,7 +115,10 @@ def register_ensembl_lookup_tools(mcp) -> None:
             query_type="ensembl_info",
             query_value=ids if len(ids) > 1 else ids[0],
             result=result,
-            engine="gget.info",
+            engine="ensembl.rest",
             operation="gene_info",
-            message=f"Retrieved metadata for {result['returned']} Ensembl ID(s).",
+            message=(
+                f"Retrieved metadata for {result['returned']} Ensembl ID(s) "
+                f"(release {ens_release})."
+            ),
         )

@@ -1,0 +1,82 @@
+{
+  "version": "1",
+  "description": "Public VirBench-style subset for Kiki. Ground-truth counts from Anthropic blog (Nasri et al., 2026) and stable smoke queries. Full VirBench (120 queries) is not public.",
+  "reference": "https://github.com/snap-stanford/Biomni — blog: Paving the way for agents in biology (Jun 2026)",
+  "queries": [
+    {
+      "id": "smoke_sars_cov2_ref_preset",
+      "name": "SARS-CoV-2 reference genome (preset)",
+      "source": "kiki preset sars_cov2_ref_genome",
+      "tool": "count_virus_sequences",
+      "params": { "preset": "sars_cov2_ref_genome" },
+      "expected_count": 1,
+      "tolerance": 0,
+      "tags": ["safe", "smoke", "virus"]
+    },
+    {
+      "id": "smoke_nc_045512_accession",
+      "name": "Wuhan-Hu-1 RefSeq accession NC_045512.2",
+      "source": "NCBI Virus safe test accession",
+      "tool": "count_virus_sequences",
+      "params": { "query": "NC_045512.2", "is_accession": true },
+      "expected_count": 1,
+      "tolerance": 0,
+      "tags": ["safe", "smoke", "virus"]
+    },
+    {
+      "id": "smoke_sars_cov2_spike_uniprot",
+      "name": "SARS-CoV-2 spike reviewed (UniProt preset)",
+      "source": "kiki preset sars_cov2_spike",
+      "tool": "count_proteins",
+      "params": { "preset": "sars_cov2_spike" },
+      "expected_count": 1,
+      "tolerance": 0,
+      "tags": ["safe", "smoke", "uniprot"]
+    },
+    {
+      "id": "smoke_human_insulin_uniprot",
+      "name": "Human insulin reviewed (UniProt preset)",
+      "source": "kiki preset human_insulin",
+      "tool": "count_proteins",
+      "params": { "preset": "human_insulin" },
+      "expected_count": 2,
+      "tolerance": 0,
+      "tags": ["safe", "smoke", "uniprot"],
+      "note": "Two reviewed human INS entries (preproinsulin isoforms) in UniProt."
+    },
+    {
+      "id": "blog_ebola_zebov_2014_window",
+      "name": "Ebola ZEBOV human Africa Jan–Jun 2014 (blog VirBench example)",
+      "source": "blog.md — TaxID 3052462, expected 266 sequences",
+      "tool": "retrieve_virus_dataset",
+      "count_field": "dataset_manifest.accession_count",
+      "params": {
+        "query": "3052462",
+        "is_accession": false,
+        "host": "Homo sapiens",
+        "geographic_location": "Africa",
+        "min_collection_date": "2014-01-01",
+        "max_collection_date": "2014-06-20",
+        "min_seq_length": 15200,
+        "max_ambiguous_chars": 1900,
+        "lab_passaged": false,
+        "confirm_download": true,
+        "verbose": false
+      },
+      "expected_count": 266,
+      "tolerance": 0,
+      "tags": ["blog", "virus", "dataset", "integration"]
+    },
+    {
+      "id": "preset_ebola_human_complete_africa",
+      "name": "Ebola human complete genomes in Africa (metadata count)",
+      "source": "kiki preset ebola_human_complete_africa",
+      "tool": "count_virus_sequences",
+      "params": { "preset": "ebola_human_complete_africa" },
+      "expected_count": null,
+      "tolerance": 0,
+      "tags": ["virus", "integration"],
+      "note": "No fixed ground truth — records count for reproducibility only (NCBI grows over time)."
+    }
+  ]
+}
