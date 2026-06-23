@@ -15,6 +15,7 @@ class ToolResponse:
     records: list[dict[str, Any]] | None = None
     output_dir: str | None = None
     files: list[str] | None = None
+    manifest: dict[str, Any] | None = None
     message: str | None = None
 
     def to_dict(self) -> dict[str, Any]:

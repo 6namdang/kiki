@@ -1,11 +1,13 @@
 import pytest
 
-from kiki.services.gget_virus import validate_dataset_request
+from kiki.services.filters import validate_query_scope
 
 
 def test_dataset_requires_confirmation() -> None:
     with pytest.raises(ValueError, match="confirm_download"):
-        validate_dataset_request(
+        from kiki.services.gget_virus import run_virus_dataset
+
+        run_virus_dataset(
             query="123456",
             is_accession=False,
             confirm_download=False,
@@ -14,28 +16,28 @@ def test_dataset_requires_confirmation() -> None:
 
 
 def test_large_taxid_requires_filters() -> None:
-    with pytest.raises(ValueError, match="filter"):
-        validate_dataset_request(
+    with pytest.raises(ValueError, match="narrowing filters"):
+        validate_query_scope(
             query="2697049",
             is_accession=False,
-            confirm_download=True,
             filters={},
+            operation="fetch metadata",
         )
 
 
 def test_large_taxid_allowed_with_filters() -> None:
-    validate_dataset_request(
+    validate_query_scope(
         query="2697049",
         is_accession=False,
-        confirm_download=True,
         filters={"host": "Homo sapiens"},
+        operation="download a dataset",
     )
 
 
 def test_accession_skips_large_taxid_guard() -> None:
-    validate_dataset_request(
+    validate_query_scope(
         query="NC_045512.2",
         is_accession=True,
-        confirm_download=True,
         filters={},
+        operation="fetch metadata",
     )

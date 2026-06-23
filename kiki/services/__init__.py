@@ -1,9 +1,10 @@
-from kiki.services.gget_virus import retrieve_virus_dataset, validate_dataset_request
-from kiki.services.ncbi import fetch_accession_metadata, fetch_taxon_metadata_page
+from kiki.services.filters import has_narrowing_filter, validate_query_scope
+from kiki.services.gget_virus import run_virus_dataset
+from kiki.services.ncbi import fetch_virus_metadata_query
 
 __all__ = [
-    "fetch_accession_metadata",
-    "fetch_taxon_metadata_page",
-    "retrieve_virus_dataset",
-    "validate_dataset_request",
+    "fetch_virus_metadata_query",
+    "has_narrowing_filter",
+    "run_virus_dataset",
+    "validate_query_scope",
 ]

@@ -8,3 +8,7 @@ def create_server() -> FastMCP:
     mcp = FastMCP(SERVER_NAME)
     register_all_tools(mcp)
     return mcp
+
+
+# Horizon / `fastmcp run` entrypoint (e.g. kiki/server.py:mcp)
+mcp = create_server()

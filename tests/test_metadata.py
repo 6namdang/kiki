@@ -17,8 +17,10 @@ async def test_metadata_tool_in_process() -> None:
 
         result = await client.call_tool(
             "get_virus_metadata",
-            {"accession": "NC_045512.2"},
+            {"query": "NC_045512.2", "is_accession": True},
         )
         assert result.data["success"] is True
         assert result.data["returned"] >= 1
+        assert result.data["total_available"] >= 1
         assert result.data["records"][0]["accession"] == "NC_045512.2"
+        assert result.data["audit"]["pagination_complete"] is True

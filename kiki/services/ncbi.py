@@ -2,20 +2,18 @@ import json
 import shutil
 import tempfile
 from pathlib import Path
-from urllib.parse import quote
 
-import requests
-from gget.constants import NCBI_API_BASE
 from gget.gget_virus import fetch_virus_metadata
 
 from kiki.config import MAX_METADATA_LIMIT
+from kiki.services.filters import metadata_kwargs, validate_query_scope
 
 
-def read_jsonl_records(path: str | Path, limit: int) -> list[dict]:
+def read_jsonl_records(path: str | Path, limit: int | None = None) -> list[dict]:
     records: list[dict] = []
     with open(path, encoding="utf-8") as handle:
         for line in handle:
-            if len(records) >= limit:
+            if limit is not None and len(records) >= limit:
                 break
             line = line.strip()
             if line:
@@ -23,43 +21,62 @@ def read_jsonl_records(path: str | Path, limit: int) -> list[dict]:
     return records
 
 
-def fetch_taxon_metadata_page(
-    taxid: str,
-    limit: int,
-    host: str | None = None,
+def count_jsonl_records(path: str | Path) -> int:
+    count = 0
+    with open(path, encoding="utf-8") as handle:
+        for line in handle:
+            if line.strip():
+                count += 1
+    return count
+
+
+def fetch_virus_metadata_query(
+    *,
+    query: str,
+    is_accession: bool = False,
+    preview_limit: int = MAX_METADATA_LIMIT,
+    filters: dict | None = None,
 ) -> dict:
-    url = f"{NCBI_API_BASE}/virus/taxon/{quote(taxid, safe='')}/dataset_report"
-    params = {"page_size": min(limit, MAX_METADATA_LIMIT)}
-    if host:
-        host_param = host.strip("\"'-_<|>`'").replace("-", "+").replace("_", "+").replace(" ", "+")
-        params["filter.host"] = host_param
+    """Fetch virus metadata via gget with full API pagination.
 
-    response = requests.get(url, params=params, timeout=60)
-    response.raise_for_status()
-    data = response.json()
-    reports = data.get("reports", [])[:limit]
-    return {
-        "returned": len(reports),
-        "total_available": data.get("total_count"),
-        "records": reports,
-    }
+    Uses gget.gget_virus.fetch_virus_metadata so all pages are retrieved
+    before returning. Only ``preview_limit`` records are included inline;
+    total_fetched reports the complete paginated count.
+    """
+    filters = filters or {}
+    validate_query_scope(
+        query=query,
+        is_accession=is_accession,
+        filters=filters,
+        operation="fetch metadata",
+    )
 
-
-def fetch_accession_metadata(
-    accession: str,
-    host: str | None = None,
-    limit: int = MAX_METADATA_LIMIT,
-) -> list[dict]:
-    temp_dir = tempfile.mkdtemp(prefix="kiki_mcp_")
+    preview_limit = min(max(1, preview_limit), MAX_METADATA_LIMIT)
+    temp_dir = tempfile.mkdtemp(prefix="kiki_metadata_")
     try:
-        temp_file, _ = fetch_virus_metadata(
-            accession,
-            accession=True,
-            host=host,
+        temp_file, deferred_filters = fetch_virus_metadata(
+            query,
+            accession=is_accession,
             temp_output_dir=temp_dir,
+            **metadata_kwargs(filters),
         )
         if not temp_file:
-            return []
-        return read_jsonl_records(temp_file, limit)
+            return {
+                "total_fetched": 0,
+                "returned": 0,
+                "records": [],
+                "pagination_complete": True,
+                "deferred_filters": deferred_filters,
+            }
+
+        total_fetched = count_jsonl_records(temp_file)
+        records = read_jsonl_records(temp_file, preview_limit)
+        return {
+            "total_fetched": total_fetched,
+            "returned": len(records),
+            "records": records,
+            "pagination_complete": True,
+            "deferred_filters": deferred_filters,
+        }
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
