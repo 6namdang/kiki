@@ -4,14 +4,13 @@ from kiki.tools._params import metadata_filter_kwargs
 from kiki.tools._response import build_query_params, extract_filters, success_manifest
 
 
-def register_metadata_tools(mcp) -> None:
+def register_count_tools(mcp) -> None:
     @mcp.tool()
     @tool_safe
-    def get_virus_metadata(
+    def count_virus_sequences(
         query: str | None = None,
         is_accession: bool = False,
         preset: str | None = None,
-        preview_limit: int = 10,
         host: str | None = None,
         geographic_location: str | None = None,
         annotated: bool | None = None,
@@ -19,17 +18,18 @@ def register_metadata_tools(mcp) -> None:
         refseq_only: bool | None = None,
         min_release_date: str | None = None,
     ) -> dict:
-        """Query NCBI Virus metadata via gget with full pagination.
+        """Count virus metadata records without downloading sequences.
 
-        Uses gget fetch_virus_metadata — all API pages are fetched before responding.
-        Returns up to preview_limit records inline plus total_available count.
-        Does not download sequence files. Large taxa require narrowing filters.
+        Uses the same gget.fetch_virus_metadata pagination path as get_virus_metadata
+        with preview_limit=0. Supports metadata API filters and presets such as
+        ebola_human_complete_africa. For counts that require dataset-only filters
+        (collection dates, sequence length), use retrieve_virus_dataset and read
+        manifest accession_count.
         """
         params = build_query_params(
             preset=preset,
             query=query,
             is_accession=is_accession,
-            preview_limit=preview_limit,
             **metadata_filter_kwargs(
                 host=host,
                 geographic_location=geographic_location,
@@ -46,26 +46,24 @@ def register_metadata_tools(mcp) -> None:
         result = fetch_virus_metadata_query(
             query=params["query"],
             is_accession=params.get("is_accession", False),
-            preview_limit=preview_limit,
+            preview_limit=0,
             filters=filters,
         )
 
         return success_manifest(
-            tool="get_virus_metadata",
+            tool="count_virus_sequences",
             params=params,
             result={
-                "returned": result["returned"],
-                "total_available": result["total_fetched"],
-                "records": result["records"],
+                "count": result["total_fetched"],
+                "pagination_complete": result["pagination_complete"],
             },
             engine="gget.fetch_virus_metadata",
-            operation="metadata_paginated",
+            operation="metadata_count",
             message=(
-                f"Fetched {result['total_fetched']} metadata records via gget pagination. "
-                f"Returning {result['returned']} inline preview. No sequences downloaded."
+                f"Counted {result['total_fetched']} metadata records. "
+                "No sequences downloaded."
             ),
             provenance_extra={
-                "pagination_complete": result["pagination_complete"],
                 "deferred_filters": result.get("deferred_filters"),
             },
         )

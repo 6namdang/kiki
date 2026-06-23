@@ -1,7 +1,7 @@
 [project]
 name = "kiki"
 version = "0.1.0"
-description = "MCP infrastructure for deterministic biological sequence data retrieval"
+description = "MCP infrastructure for deterministic biological sequence and protein data retrieval"
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }

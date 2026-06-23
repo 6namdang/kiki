@@ -7,15 +7,34 @@ from typing import Any
 import gget
 
 from kiki.config import DEFAULT_OUTPUT_ROOT
+from kiki.errors import ErrorCode, KikiError
+from kiki.query.validate import validate_filters
+from kiki.services.command_summary import parse_command_summary
 from kiki.services.filters import validate_query_scope, virus_kwargs
 
 
 def build_output_dir(root: Path, query: str) -> Path:
     timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
-    safe_query = "".join(char if char.isalnum() else "_" for char in query)[:40]
+    label = query.strip() or "all_accessions"
+    safe_query = "".join(char if char.isalnum() else "_" for char in label)[:40]
     out_dir = root / f"{safe_query}_{timestamp}"
     out_dir.mkdir(parents=True, exist_ok=True)
     return out_dir
+
+
+def resolve_outfolder(
+    *,
+    query: str,
+    outfolder: str | None,
+    output_root: Path | None,
+) -> Path:
+    if outfolder:
+        path = Path(outfolder).expanduser()
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    root = output_root or Path(os.environ.get("KIKI_OUTPUT_DIR", DEFAULT_OUTPUT_ROOT))
+    return build_output_dir(root, query)
 
 
 def list_files(directory: Path) -> list[str]:
@@ -33,6 +52,7 @@ def build_dataset_manifest(output_dir: Path) -> dict[str, Any]:
     manifest: dict[str, Any] = {
         "accession_count": None,
         "artifacts": {},
+        "failures": {"detected": False},
     }
 
     for path in sorted(output_dir.rglob("*")):
@@ -40,19 +60,23 @@ def build_dataset_manifest(output_dir: Path) -> dict[str, Any]:
             continue
 
         name = path.name.lower()
-        rel = str(path.relative_to(output_dir))
 
         if name.endswith("_metadata.csv") and "genbank" not in name and "merged" not in name:
             manifest["artifacts"]["metadata_csv"] = str(path)
             manifest["accession_count"] = _count_csv_rows(path)
+        elif name.endswith("_metadata.jsonl"):
+            manifest["artifacts"]["metadata_jsonl"] = str(path)
         elif name.endswith(".fasta") or name.endswith(".fa"):
             manifest["artifacts"]["fasta"] = str(path)
         elif name == "command_summary.txt":
             manifest["artifacts"]["command_summary"] = str(path)
+            manifest["failures"] = parse_command_summary(path)
         elif name.endswith("_merged.csv"):
             manifest["artifacts"]["merged_metadata_csv"] = str(path)
         elif name.endswith("_genbank_metadata.csv"):
             manifest["artifacts"]["genbank_metadata_csv"] = str(path)
+        elif name == "genbank_failed_batches.log":
+            manifest["artifacts"]["genbank_failed_batches_log"] = str(path)
 
     return manifest
 
@@ -69,11 +93,12 @@ def run_virus_dataset(
     filters = filters or {}
 
     if not confirm_download:
-        raise ValueError(
-            "Dataset retrieval writes files to disk. "
-            "Pass confirm_download=true only when you intend to download a dataset."
+        raise KikiError(
+            ErrorCode.CONFIRM_DOWNLOAD_REQUIRED,
+            "Dataset retrieval writes files to disk. Pass confirm_download=true.",
         )
 
+    validate_filters(filters)
     validate_query_scope(
         query=query,
         is_accession=is_accession,
@@ -81,14 +106,22 @@ def run_virus_dataset(
         operation="download a dataset",
     )
 
-    root = output_root or Path(os.environ.get("KIKI_OUTPUT_DIR", DEFAULT_OUTPUT_ROOT))
-    outfolder = build_output_dir(root, query)
+    outfolder = resolve_outfolder(
+        query=query,
+        outfolder=filters.get("outfolder"),
+        output_root=output_root,
+    )
+
+    gget_args = virus_kwargs(filters)
+    api_key = os.environ.get("NCBI_API_KEY")
+    if api_key:
+        gget_args["api_key"] = api_key
 
     gget.virus(
         query,
         is_accession=is_accession,
         outfolder=str(outfolder),
-        **virus_kwargs(filters),
+        **gget_args,
     )
 
     files = list_files(outfolder)

@@ -6,6 +6,7 @@ from pathlib import Path
 from gget.gget_virus import fetch_virus_metadata
 
 from kiki.config import MAX_METADATA_LIMIT
+from kiki.query.validate import validate_filters
 from kiki.services.filters import metadata_kwargs, validate_query_scope
 
 
@@ -44,6 +45,7 @@ def fetch_virus_metadata_query(
     total_fetched reports the complete paginated count.
     """
     filters = filters or {}
+    validate_filters(filters)
     validate_query_scope(
         query=query,
         is_accession=is_accession,
@@ -51,7 +53,7 @@ def fetch_virus_metadata_query(
         operation="fetch metadata",
     )
 
-    preview_limit = min(max(1, preview_limit), MAX_METADATA_LIMIT)
+    preview_limit = min(max(0, preview_limit), MAX_METADATA_LIMIT)
     temp_dir = tempfile.mkdtemp(prefix="kiki_metadata_")
     try:
         temp_file, deferred_filters = fetch_virus_metadata(
@@ -70,7 +72,7 @@ def fetch_virus_metadata_query(
             }
 
         total_fetched = count_jsonl_records(temp_file)
-        records = read_jsonl_records(temp_file, preview_limit)
+        records = read_jsonl_records(temp_file, preview_limit) if preview_limit > 0 else []
         return {
             "total_fetched": total_fetched,
             "returned": len(records),
