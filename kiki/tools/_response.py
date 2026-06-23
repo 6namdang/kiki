@@ -1,5 +1,6 @@
 from typing import Any
 
+from kiki.audit.history import record_manifest
 from kiki.errors import ErrorCode, KikiError
 from kiki.models.manifest import QueryManifest, build_provenance
 from kiki.query.presets import resolve_preset
@@ -73,6 +74,7 @@ def success_manifest(
     operation: str,
     message: str,
     provenance_extra: dict[str, Any] | None = None,
+    record_history: bool = True,
 ) -> dict[str, Any]:
     query_value = params.get("query", "")
     query_type = "accession" if params.get("is_accession") else "taxon"
@@ -97,4 +99,7 @@ def success_manifest(
         ),
         message=message,
     )
-    return manifest.to_dict()
+    payload = manifest.to_dict()
+    if record_history:
+        payload["audit_record"] = record_manifest(payload)
+    return payload

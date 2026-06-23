@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from kiki.audit.history import record_manifest
 from kiki.errors import ErrorCode, KikiError
 from kiki.models.manifest import QueryManifest, build_provenance
 from kiki.query.uniprot import build_uniprot_query, validate_length_range, validate_uniprot_scope
@@ -90,6 +91,7 @@ def uniprot_success_manifest(
     operation: str,
     message: str,
     provenance_extra: dict[str, Any] | None = None,
+    record_history: bool = True,
 ) -> dict[str, Any]:
     query_payload = {
         "type": "uniprot",
@@ -121,7 +123,10 @@ def uniprot_success_manifest(
         ),
         message=message,
     )
-    return manifest.to_dict()
+    payload = manifest.to_dict()
+    if record_history:
+        payload["audit_record"] = record_manifest(payload)
+    return payload
 
 
 def guard_uniprot_scope(params: dict[str, Any], uniprot_query: str, operation: str) -> None:

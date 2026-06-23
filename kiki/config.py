@@ -12,6 +12,9 @@ LARGE_TAXIDS = frozenset({"2697049", "10239"})
 # Default root for dataset downloads (override with KIKI_OUTPUT_DIR).
 DEFAULT_OUTPUT_ROOT = Path.cwd() / "kiki_output"
 
+# Append-only manifest audit log (override with KIKI_AUDIT_DIR).
+DEFAULT_AUDIT_DIR = Path.cwd() / "kiki_audit"
+
 # UniProt REST API
 UNIPROT_BASE_URL = "https://rest.uniprot.org"
 UNIPROT_MAX_PAGE_SIZE = 500

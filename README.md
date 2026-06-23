@@ -1,8 +1,10 @@
 # Kiki
 
-MCP server for **deterministic biological sequence data retrieval** — Phase 1: NCBI Virus.
+MCP server for **deterministic biological data retrieval** — NCBI Virus (via gget) and UniProt (via REST API).
 
-Agents call Kiki tools to query virus metadata, count records, or retrieve filtered datasets from NCBI. Every successful response uses a **QueryManifest** envelope with deterministic `query_id`, structured `result`, and `provenance` for reproducibility. Errors return stable machine-readable codes.
+Agents call Kiki tools to query metadata, count records, retrieve datasets, or map identifiers. Every successful response uses a **QueryManifest** envelope with a deterministic `query_id`, structured `result`, and `provenance` block. Errors return stable machine-readable codes.
+
+---
 
 ## Install
 
@@ -14,11 +16,6 @@ python3 -m venv venv
 source venv/bin/activate
 
 pip install -e ".[dev]"
-```
-
-Verify the CLI:
-
-```bash
 kiki serve --help
 ```
 
@@ -26,9 +23,7 @@ kiki serve --help
 
 ## Run the server
 
-### Option A: HTTP (default)
-
-Best for testing, scripts, or hosted deployments.
+### HTTP (default)
 
 ```bash
 kiki serve --transport http --host 127.0.0.1 --port 8000
@@ -36,27 +31,13 @@ kiki serve --transport http --host 127.0.0.1 --port 8000
 
 Server URL: `http://127.0.0.1:8000/mcp`
 
-Leave this terminal running while you connect clients.
-
-### Option B: stdio
-
-Best for **Cursor** and **Claude Desktop** (agent launches the process directly).
+### stdio (Cursor / Claude Desktop)
 
 ```bash
 kiki serve --transport stdio
 ```
 
----
-
-## Connect an MCP client
-
-### Cursor
-
-1. Open **Cursor Settings → MCP → Add server**
-2. Add one of the configs below
-3. Restart Cursor or reload MCP servers
-
-**stdio (recommended for Cursor):**
+**Cursor (stdio):**
 
 ```json
 {
@@ -69,7 +50,7 @@ kiki serve --transport stdio
 }
 ```
 
-**HTTP (if the server is already running):**
+**Cursor / scripts (HTTP):**
 
 ```json
 {
@@ -81,46 +62,110 @@ kiki serve --transport stdio
 }
 ```
 
-Replace `/absolute/path/to/kiki` with your actual project path.
-
-### Claude Desktop
-
-Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "kiki": {
-      "command": "/absolute/path/to/kiki/venv/bin/kiki",
-      "args": ["serve", "--transport", "stdio"]
-    }
-  }
-}
-```
-
-Restart Claude Desktop after saving.
+**Claude Desktop** — same stdio config in `~/Library/Application Support/Claude/claude_desktop_config.json`.
 
 ---
 
-## Use the tools
+## Tools reference
 
-Once connected, ask your agent to call Kiki tools — or call them from Python.
+Kiki exposes **8 tools** across two data sources. Use the safe query/count tools for exploration; use dataset tools only when you intend to write files to disk.
 
-### 1. `get_virus_metadata` — query only (safe)
+| # | Tool | Source | Purpose | Writes files? |
+|---|------|--------|---------|---------------|
+| 1 | [`get_virus_metadata`](#1-get_virus_metadata) | NCBI Virus / gget | Paginated metadata search + inline preview | No |
+| 2 | [`count_virus_sequences`](#2-count_virus_sequences) | NCBI Virus / gget | Count metadata records | No |
+| 3 | [`retrieve_virus_dataset`](#3-retrieve_virus_dataset) | NCBI Virus / gget | Full sequence dataset (FASTA/CSV/JSONL) | **Yes** |
+| 4 | [`search_proteins`](#4-search_proteins) | UniProt REST | Paginated protein search + inline preview | No |
+| 5 | [`count_proteins`](#5-count_proteins) | UniProt REST | Count matching proteins | No |
+| 6 | [`get_protein`](#6-get_protein) | UniProt REST | Single accession lookup | No |
+| 7 | [`retrieve_protein_dataset`](#7-retrieve_protein_dataset) | UniProt REST | Bulk FASTA download | **Yes** |
+| 8 | [`map_protein_ids`](#8-map_protein_ids) | UniProt REST | Cross-database ID mapping | No |
+| 9 | [`get_query_history`](#9-get_query_history) | Kiki audit log | Inspect prior QueryManifest runs | No |
 
-Returns JSON metadata via **`gget.fetch_virus_metadata`** with **full API pagination**.
-**Does not download sequences.** Returns up to `preview_limit` records inline plus `total_available` (full fetched count).
+### Shared behavior
 
-**By accession:**
+**Response shape** — all tools return a QueryManifest:
 
 ```json
 {
-  "query": "NC_045512.2",
-  "is_accession": true
+  "tool": "get_virus_metadata",
+  "success": true,
+  "query_id": "a1b2c3d4e5f6g7h8",
+  "query": { "type": "accession", "value": "NC_045512.2" },
+  "result": { },
+  "provenance": { "engine": "...", "operation": "...", "filters_applied": [] },
+  "message": "Human-readable summary."
 }
 ```
 
-**By taxon** (name or taxid — e.g. Ebola `186538`):
+**Presets** — most search/count/dataset tools accept a `preset` string that merges curated defaults. Explicit arguments always override preset values. See [Virus presets](#virus-presets) and [UniProt presets](#uniprot-presets).
+
+**Dataset downloads** — `retrieve_virus_dataset` and `retrieve_protein_dataset` require `"confirm_download": true`. Output goes to `kiki_output/` by default, or set `outfolder` / `KIKI_OUTPUT_DIR`.
+
+**Environment variables**
+
+| Variable | Effect |
+|----------|--------|
+| `KIKI_OUTPUT_DIR` | Override default download directory |
+| `KIKI_AUDIT_DIR` | Override manifest audit log directory (default: `./kiki_audit`) |
+| `NCBI_API_KEY` | Forwarded to gget for NCBI Virus tools |
+
+**Audit & reproducibility** — virus tool responses include enriched `provenance`:
+
+- `filter_application` — per-filter stage (`ncbi_virus_api`, `deferred_local`, `local_metadata_filter`) with human-readable explanations when gget applies filters locally
+- `command_summary` — excerpt from gget's `command_summary.txt` (dataset downloads)
+- `audit_record` — pointer to the append-only local history file
+- `query_id` — deterministic hash of normalized params; same inputs → same `query_id`
+
+Use **`get_query_history`** to inspect prior runs by `query_id` or list recent entries by `tool`.
+
+**Typed errors**
+
+| Code | Meaning |
+|------|---------|
+| `QUERY_TOO_BROAD` | Large taxon/organism without narrowing filters |
+| `CONFIRM_DOWNLOAD_REQUIRED` | Dataset tool called without `confirm_download=true` |
+| `INVALID_DATE_RANGE` / `INVALID_DATE_FORMAT` | Bad date filters (virus) |
+| `INVALID_SEQ_LENGTH_RANGE` | Min length > max length |
+| `PRESET_NOT_FOUND` | Unknown preset name |
+| `INVALID_PARAMETER` | Missing required input or invalid filter |
+| `UPSTREAM_ERROR` | gget or UniProt API failure |
+| `NOT_FOUND` | UniProt accession not found |
+
+---
+
+## NCBI Virus tools
+
+Powered by [gget](https://github.com/pachterlab/gget) against [NCBI Virus](https://www.ncbi.nlm.nih.gov/labs/virus/). Large taxa (e.g. SARS-CoV-2 `2697049`) require narrowing filters unless querying a specific accession.
+
+### 1. `get_virus_metadata`
+
+Query virus metadata with full gget pagination. Returns up to `preview_limit` records inline plus `total_available`. **Does not download sequences.**
+
+**Parameters**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `query` | string | — | Taxon name/ID or accession |
+| `is_accession` | bool | `false` | Treat `query` as accession |
+| `preset` | string | — | Named preset (see below) |
+| `preview_limit` | int | `10` | Max inline records (max 100) |
+| `host` | string | — | Host organism name or taxid |
+| `geographic_location` | string | — | e.g. `Africa`, `USA` |
+| `annotated` | bool | — | Annotated sequences only |
+| `complete_only` | bool | — | Complete genomes only |
+| `refseq_only` | bool | — | RefSeq records only |
+| `min_release_date` | string | — | `YYYY-MM-DD` |
+
+**Examples**
+
+By accession (safest starting point):
+
+```json
+{ "query": "NC_045512.2", "is_accession": true }
+```
+
+By taxon with filters:
 
 ```json
 {
@@ -131,49 +176,104 @@ Returns JSON metadata via **`gget.fetch_virus_metadata`** with **full API pagina
 }
 ```
 
-Supported metadata filters: `host`, `geographic_location`, `annotated`, `complete_only`, `refseq_only`, `min_release_date`.
+With preset:
 
-Example response shape:
+```json
+{ "preset": "sars_cov2_ref_genome" }
+```
+
+**Result fields:** `returned`, `total_available`, `records[]`
+
+---
+
+### 2. `count_virus_sequences`
+
+Count metadata records using the same gget pagination path as `get_virus_metadata`, with no inline records. Supports metadata-compatible filters and presets only.
+
+**Parameters** — same filters as `get_virus_metadata` (no `preview_limit`).
+
+**Examples**
+
+```json
+{ "preset": "sars_cov2_ref_genome" }
+```
 
 ```json
 {
-  "tool": "get_virus_metadata",
-  "success": true,
-  "query_id": "a1b2c3d4e5f6g7h8",
-  "query": { "type": "accession", "value": "NC_045512.2", "is_accession": true },
-  "result": {
-    "returned": 5,
-    "total_available": 142,
-    "records": [{ "accession": "...", "length": 19710 }]
-  },
-  "provenance": {
-    "engine": "gget.fetch_virus_metadata",
-    "operation": "metadata_paginated",
-    "pagination_complete": true,
-    "filters_applied": []
-  },
-  "message": "Fetched 142 metadata records via gget pagination. Returning 5 inline preview."
+  "query": "186538",
+  "host": "Homo sapiens",
+  "complete_only": true,
+  "geographic_location": "Africa"
 }
 ```
 
-Optional **`preset`** parameter (e.g. `sars_cov2_ref_genome`, `ebola_human_complete_africa`) merges curated defaults; explicit args override preset values.
+**Result fields:** `count`, `pagination_complete`
 
-### 2. `count_virus_sequences` — count only (safe)
+> For counts requiring dataset-only filters (collection dates, sequence length), use `retrieve_virus_dataset` and read `dataset_manifest.accession_count`.
 
-Same metadata pagination path as `get_virus_metadata` with `preview_limit=0`. Returns `{ "count": N }` without downloading sequences. Use metadata-compatible filters and presets only; for dataset-only filters (collection dates, sequence length), use `retrieve_virus_dataset` and read `dataset_manifest.accession_count`.
+---
 
-```json
-{
-  "preset": "sars_cov2_ref_genome"
-}
-```
+### 3. `retrieve_virus_dataset`
 
-### 3. `retrieve_virus_dataset` — full gget.virus pipeline
+Full `gget.virus` pipeline: metadata filtering, pagination, sequence download, CSV/FASTA/JSONL output. **Requires `confirm_download: true`.**
 
-Wraps **`gget.virus`** end-to-end: metadata filtering, pagination, sequence download, CSV/FASTA output.
-Writes files to `kiki_output/`. Returns **file paths + manifest**, not inline sequences.
+**Parameters**
 
-**Requires `confirm_download: true`.** Large taxa (e.g. SARS-CoV-2) require narrowing filters.
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `query` | string | — | Taxon, taxid, accession, space-separated accessions, or accession list file path |
+| `is_accession` | bool | `false` | Accession mode |
+| `preset` | string | — | Named preset |
+| `confirm_download` | bool | `false` | **Must be `true`** to run |
+| `download_all_accessions` | bool | `false` | Filter across all viral accessions (requires narrowing filters) |
+| `is_sars_cov2` | bool | `false` | NCBI cached SARS-CoV-2 download |
+| `is_alphainfluenza` | bool | `false` | NCBI cached Influenza A download |
+| `outfolder` | string | — | Output directory |
+| `host` | string | — | Host filter |
+| `geographic_location` | string | — | Location filter |
+| `annotated` | bool | — | Annotated only |
+| `complete_only` | bool | — | Complete genomes (maps to `nuc_completeness`) |
+| `refseq_only` | bool | — | RefSeq only (maps to `source_database`) |
+| `min_release_date` | string | — | `YYYY-MM-DD` |
+| `max_release_date` | string | — | `YYYY-MM-DD` |
+| `min_collection_date` | string | — | `YYYY-MM-DD` |
+| `max_collection_date` | string | — | `YYYY-MM-DD` |
+| `min_seq_length` | int | — | Min nucleotide length |
+| `max_seq_length` | int | — | Max nucleotide length |
+| `min_gene_count` | int | — | Min genes |
+| `max_gene_count` | int | — | Max genes |
+| `nuc_completeness` | string | — | `complete` or `partial` |
+| `has_proteins` | string \| list | — | e.g. `"spike"` or `["spike", "ORF1ab"]` |
+| `proteins_complete` | bool | `false` | All annotated proteins complete |
+| `lab_passaged` | bool | — | Lab-passaged samples |
+| `submitter_country` | string | — | Submitter country |
+| `min_mature_peptide_count` | int | — | Min mature peptides |
+| `max_mature_peptide_count` | int | — | Max mature peptides |
+| `min_protein_count` | int | — | Min proteins |
+| `max_protein_count` | int | — | Max proteins |
+| `max_ambiguous_chars` | int | — | Max ambiguous bases (N) |
+| `segment` | string \| list | — | e.g. `"HA"` or `["HA", "NA"]` |
+| `vaccine_strain` | bool | — | Vaccine strain filter |
+| `source_database` | string | — | `genbank` or `refseq` |
+| `lineage` | string \| list | — | SARS-CoV-2 lineage |
+| `isolate` | string | — | Isolate name |
+| `genotype` | string \| list | — | Genotype |
+| `isolation_source` | string | — | Isolation source |
+| `env_source` | string \| list | — | Environmental source |
+| `submitter_name` | string | — | Submitter name |
+| `submitter_institution` | string | — | Submitter institution |
+| `gen_mol_type` | string | — | Genomic molecule type |
+| `genbank_metadata` | bool | `false` | Fetch GenBank metadata CSV |
+| `genbank_batch_size` | int | — | GenBank batch size (default 200) |
+| `provirus` | bool | — | Provirus filter |
+| `keep_temp` | bool | `false` | Keep intermediate files |
+| `verbose` | bool | `true` | gget progress output |
+
+See `gget_virus_docs.md` for full gget.virus documentation.
+
+**Examples**
+
+Ebola surveillance dataset:
 
 ```json
 {
@@ -186,79 +286,196 @@ Writes files to `kiki_output/`. Returns **file paths + manifest**, not inline se
 }
 ```
 
-Supports the full **`gget.virus`** surface from `gget_virus_docs.md`:
-
-| Category | Parameters |
-|----------|------------|
-| Query modes | `query`, `is_accession`, `download_all_accessions` |
-| Optimized caches | `is_sars_cov2`, `is_alphainfluenza` |
-| Host / location | `host`, `geographic_location`, `submitter_country` |
-| Sequence / gene | `nuc_completeness`, `complete_only`, `min_seq_length`, `max_seq_length`, gene/protein/peptide counts, `max_ambiguous_chars`, `has_proteins`, `segment`, `proteins_complete` |
-| Dates | `min_collection_date`, `max_collection_date`, `min_release_date`, `max_release_date` |
-| Quality flags | `annotated`, `lab_passaged`, `vaccine_strain`, `provirus` |
-| Database / lineage | `source_database`, `refseq_only`, `lineage`, `isolate`, `genotype`, … |
-| Workflow | `outfolder`, `genbank_metadata`, `genbank_batch_size`, `keep_temp`, `verbose` |
-
-Query may be a taxon, taxid, single accession, space-separated accessions, or a path to an accession list file (`is_accession=true`).
-
-Presets: `sars_cov2_ref_genome`, `sars_cov2_human_complete`, `influenza_a_human_complete`, `ebola_human_complete_since_2014`.
-
-**Failure handling:** gget writes `command_summary.txt` with a `FAILED OPERATIONS - RETRY COMMANDS` section when batches fail. Kiki parses this into `result.failures` — always check before treating a dataset as complete.
-
-Example response shape:
+SARS-CoV-2 reference genome (cached):
 
 ```json
 {
-  "tool": "retrieve_virus_dataset",
-  "success": true,
-  "query_id": "...",
-  "result": {
-    "returned": 12,
-    "output_dir": "/path/to/kiki_output/Ebola_20260622_...",
-    "files": [".../ebola_metadata.csv", ".../ebola.fasta"],
-    "dataset_manifest": {
-      "accession_count": 12,
-      "artifacts": {
-        "metadata_csv": ".../ebola_metadata.csv",
-        "fasta": ".../ebola.fasta"
-      }
-    }
-  },
-  "provenance": { "engine": "gget.virus", "operation": "dataset_download" }
+  "query": "NC_045512.2",
+  "is_accession": true,
+  "is_sars_cov2": true,
+  "confirm_download": true
 }
 ```
 
-Dataset preset example: `ebola_human_complete_since_2014` (includes collection date filters).
+With preset:
+
+```json
+{ "preset": "ebola_human_complete_since_2014", "confirm_download": true }
+```
+
+**Result fields:** `returned`, `output_dir`, `files[]`, `dataset_manifest`, `failures`
+
+> Always check `result.failures` and `command_summary.txt` — gget writes a `FAILED OPERATIONS - RETRY COMMANDS` section when download batches fail.
+
+---
+
+### Virus presets
+
+| Preset | Compatible tools | Description |
+|--------|------------------|-------------|
+| `sars_cov2_ref_genome` | metadata, count, dataset | SARS-CoV-2 reference accession `NC_045512.2` |
+| `ebola_human_complete_africa` | metadata, count | Ebola human complete genomes in Africa |
+| `ebola_human_complete_since_2014` | dataset | Ebola human complete since 2014 in Africa |
+| `sars_cov2_human_complete` | dataset | SARS-CoV-2 human complete genomes ≥29kb + GenBank metadata |
+| `influenza_a_human_complete` | dataset | Influenza A human complete ≤15kb + GenBank metadata |
 
 ---
 
 ## UniProt tools
 
-Five tools wrap the [UniProt REST API](https://rest.uniprot.org) (`rest.uniprot.org`). All searches default to **`reviewed:true`** (Swiss-Prot) unless `include_unreviewed=true`.
+Powered by the [UniProt REST API](https://rest.uniprot.org). All search/count/dataset tools default to **`reviewed:true`** (Swiss-Prot). Pass `"include_unreviewed": true` to include TrEMBL. Large organisms (e.g. human `9606`) require narrowing filters for dataset downloads.
 
-| Tool | Purpose | Downloads? |
-|------|---------|------------|
-| `search_proteins` | Paginated search, JSON preview + total | No |
-| `count_proteins` | Count via `X-Total-Results` | No |
-| `get_protein` | Single accession (JSON summary or FASTA/txt/xml) | No (inline) |
-| `retrieve_protein_dataset` | Bulk FASTA to disk | Yes — `confirm_download=true` |
-| `map_protein_ids` | Cross-database ID mapping | No |
+### 4. `search_proteins`
 
-**Presets:** `sars_cov2_spike`, `sars_cov2_nsp12`, `ebola_vp35`, `influenza_a_ha`, `human_insulin`, `human_tp53`
+Search UniProtKB with cursor pagination. Returns up to `preview_limit` summarized records inline plus `total_available`. **Does not download sequences.**
 
-Example — SARS-CoV-2 spike count:
+**Parameters**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `query` | string | — | Raw UniProt query string |
+| `preset` | string | — | Named preset |
+| `reviewed_only` | bool | `true` | Append `(reviewed:true)` |
+| `include_unreviewed` | bool | `false` | Skip reviewed filter |
+| `organism_id` | string | — | NCBI taxonomy ID |
+| `gene` | string | — | Gene name |
+| `protein_name` | string | — | Protein name |
+| `accession` | string | — | UniProt accession |
+| `length_min` | int | — | Min sequence length |
+| `length_max` | int | — | Max sequence length |
+| `preview_limit` | int | `10` | Max inline records (max 100) |
+
+Structured filters are AND-combined with `query`. You can use `query` alone, structured filters alone, or both.
+
+**Examples**
+
+Raw query:
+
+```json
+{ "query": "insulin AND organism_id:9606" }
+```
+
+Structured filters:
+
+```json
+{ "organism_id": "9606", "gene": "INS" }
+```
+
+With preset:
+
+```json
+{ "preset": "sars_cov2_spike", "preview_limit": 5 }
+```
+
+**Result fields:** `returned`, `total_available`, `records[]` (accession, protein_name, gene_names, organism, length, reviewed)
+
+---
+
+### 5. `count_proteins`
+
+Count UniProtKB entries via `X-Total-Results` (single API request). Same filters as `search_proteins`.
+
+**Examples**
 
 ```json
 { "preset": "sars_cov2_spike" }
 ```
 
-Example — single protein FASTA:
+```json
+{ "organism_id": "9606", "gene": "TP53" }
+```
+
+**Result fields:** `count`, `pagination_complete`
+
+---
+
+### 6. `get_protein`
+
+Retrieve a single UniProtKB entry by accession. No search filters needed.
+
+**Parameters**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `accession` | string | **required** | UniProt accession (e.g. `P01308`) |
+| `format` | string | `json` | `json`, `fasta`, `txt`, `xml`, `gff`, or `rdf` |
+
+**Examples**
+
+Summarized JSON:
+
+```json
+{ "accession": "P01308" }
+```
+
+Raw FASTA:
 
 ```json
 { "accession": "P01308", "format": "fasta" }
 ```
 
-Example — ID mapping:
+**Result fields (json):** `accession`, `record`  
+**Result fields (other formats):** `accession`, `format`, `content`
+
+---
+
+### 7. `retrieve_protein_dataset`
+
+Download all matching protein sequences as FASTA to disk. Paginates through every result page. **Requires `confirm_download: true`.**
+
+**Parameters**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `query` | string | — | Raw UniProt query |
+| `preset` | string | — | Named preset |
+| `confirm_download` | bool | `false` | **Must be `true`** to run |
+| `reviewed_only` | bool | `true` | Append `(reviewed:true)` |
+| `include_unreviewed` | bool | `false` | Skip reviewed filter |
+| `organism_id` | string | — | NCBI taxonomy ID |
+| `gene` | string | — | Gene name |
+| `protein_name` | string | — | Protein name |
+| `accession` | string | — | UniProt accession |
+| `length_min` | int | — | Min sequence length |
+| `length_max` | int | — | Max sequence length |
+| `outfolder` | string | — | Output directory |
+
+**Examples**
+
+```json
+{ "preset": "ebola_vp35", "confirm_download": true }
+```
+
+```json
+{
+  "organism_id": "9606",
+  "gene": "INS",
+  "confirm_download": true
+}
+```
+
+**Result fields:** `returned`, `expected_count`, `output_dir`, `files[]`, `fasta_path`
+
+---
+
+### 8. `map_protein_ids`
+
+Map protein identifiers across databases via the UniProt ID mapping service.
+
+**Parameters**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `ids` | list[string] | **required** | IDs to map (max 5000) |
+| `from_db` | string | **required** | Source database |
+| `to_db` | string | `UniProtKB` | Target database |
+| `list_databases` | bool | `false` | Return supported fields instead of mapping |
+
+Common `from_db` / `to_db` values: `UniProtKB_AC-ID`, `Gene_Name`, `RefSeq_Protein`, `EMBL-Protein`, `UniProtKB`, `UniProtKB-Swiss-Prot`.
+
+**Examples**
+
+Accession → gene name:
 
 ```json
 {
@@ -268,41 +485,69 @@ Example — ID mapping:
 }
 ```
 
-Structured filters (`organism_id`, `gene`, `protein_name`, `length_min`, `length_max`) are AND-combined with an optional raw UniProt query string. Large organisms (e.g. human `9606`) require narrowing filters for dataset downloads.
+List supported databases:
 
-### Typed errors
+```json
+{ "ids": [], "from_db": "UniProtKB_AC-ID", "list_databases": true }
+```
 
-Failed guardrails return `{ "success": false, "error": { "code": "...", "message": "...", "details": {} } }`:
-
-| Code | Meaning |
-|------|---------|
-| `QUERY_TOO_BROAD` | Large taxon without narrowing filters |
-| `CONFIRM_DOWNLOAD_REQUIRED` | Dataset tool called without `confirm_download=true` |
-| `INVALID_DATE_RANGE` / `INVALID_DATE_FORMAT` | Bad date filters |
-| `INVALID_SEQ_LENGTH_RANGE` | `min_seq_length` > `max_seq_length` |
-| `PRESET_NOT_FOUND` | Unknown preset name |
-| `INVALID_PARAMETER` | Missing query/preset or invalid filter combo |
-| `UPSTREAM_ERROR` | UniProt/gget API failure |
-| `NOT_FOUND` | UniProt accession not found |
-
-Override the download directory with `outfolder` or the `KIKI_OUTPUT_DIR` environment variable. Optional `NCBI_API_KEY` is forwarded to gget when set.
+**Result fields:** `job_id`, `mapped_count`, `mappings[]` (from/to pairs), `failed[]`
 
 ---
 
-## Test from Python (HTTP)
+### 9. `get_query_history`
 
-Start the server in one terminal, then run the smoke client in another:
+Inspect prior tool runs stored in the local audit log (`KIKI_AUDIT_DIR/manifest_history.jsonl`). Every successful tool call is recorded with its full QueryManifest so agents can verify *how* a result was produced.
+
+**Parameters**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `query_id` | string | — | Return the most recent entry for this deterministic query hash |
+| `tool` | string | — | Filter by tool name when listing |
+| `limit` | int | `20` | Max entries when listing (max 500) |
+
+**Examples**
+
+Look up a prior run:
+
+```json
+{ "query_id": "a1b2c3d4e5f6g7h8" }
+```
+
+List recent virus counts:
+
+```json
+{ "tool": "count_virus_sequences", "limit": 10 }
+```
+
+**Result fields:** `count`, `entries[]` (each with `recorded_at`, `query_id`, `tool`, full `manifest`)
+
+---
+
+### UniProt presets
+
+| Preset | Description |
+|--------|-------------|
+| `sars_cov2_spike` | SARS-CoV-2 spike proteins (reviewed) |
+| `sars_cov2_nsp12` | SARS-CoV-2 nsp12 (reviewed) |
+| `ebola_vp35` | Ebola VP35 (reviewed) |
+| `influenza_a_ha` | Influenza A hemagglutinin (reviewed) |
+| `human_insulin` | Human insulin (`INS`, reviewed) |
+| `human_tp53` | Human TP53 (reviewed) |
+
+---
+
+## Call tools from Python
 
 ```bash
 # Terminal 1
 kiki serve --transport http --port 8000
 
 # Terminal 2
-source venv/bin/activate
-python client.py
+python client.py   # smoke test: get_virus_metadata
+pytest             # full test suite (no server needed for most tests)
 ```
-
-Or call tools directly:
 
 ```python
 import asyncio
@@ -314,110 +559,48 @@ async def main():
     async with client:
         tools = await client.list_tools()
         print([t.name for t in tools])
-        # ['get_virus_metadata', 'count_virus_sequences', 'retrieve_virus_dataset']
+        # All 8 tools:
+        # get_virus_metadata, count_virus_sequences, retrieve_virus_dataset,
+        # search_proteins, count_proteins, get_protein,
+        # retrieve_protein_dataset, map_protein_ids, get_query_history
 
-        result = await client.call_tool(
+        # Virus metadata
+        r = await client.call_tool(
             "get_virus_metadata",
             {"query": "NC_045512.2", "is_accession": True},
         )
-        print(result.data)
+        print(r.data)
+
+        # UniProt count
+        r = await client.call_tool(
+            "count_proteins",
+            {"preset": "sars_cov2_spike"},
+        )
+        print(r.data)
 
 asyncio.run(main())
 ```
-
-Or run the test suite (no server needed for most tests):
-
-```bash
-pytest
-```
-
----
-
-## Tools summary
-
-| Tool | Purpose | Downloads? |
-|------|---------|------------|
-| `get_virus_metadata` | Query NCBI Virus metadata (JSON preview) | No |
-| `count_virus_sequences` | Count metadata records (VirBench-style) | No |
-| `retrieve_virus_dataset` | Filtered dataset via `gget.virus` | Yes — requires `confirm_download=true` |
-| `search_proteins` | UniProtKB search (JSON preview) | No |
-| `count_proteins` | UniProtKB count | No |
-| `get_protein` | Single UniProt entry | No |
-| `retrieve_protein_dataset` | UniProt FASTA dataset | Yes — requires `confirm_download=true` |
-| `map_protein_ids` | UniProt ID mapping | No |
 
 ---
 
 ## Deploy to Prefect Horizon
 
-[Horizon](https://horizon.prefect.io) is managed MCP hosting from the FastMCP team. Free tier for personal projects.
+[Horizon](https://horizon.prefect.io) is managed MCP hosting from the FastMCP team.
 
-### Prerequisites
-
-1. Push this repo to **GitHub** (public or private)
-2. Entrypoint must expose a `FastMCP` object — use **`server.py:mcp`** (repo root, not `kiki/server.py:mcp`)
-
-Verify locally before deploying:
+**Entrypoint:** `server.py:mcp` (repo root — not `kiki/server.py:mcp`)
 
 ```bash
 fastmcp inspect server.py:mcp
 ```
 
-### Deploy
+1. Push repo to GitHub
+2. Go to [horizon.prefect.io](https://horizon.prefect.io) → connect repo
+3. Set entrypoint `server.py:mcp`, deploy
+4. URL: `https://YOUR-SERVER-NAME.fastmcp.app/mcp`
 
-1. Go to [horizon.prefect.io](https://horizon.prefect.io) and sign in with GitHub
-2. Connect GitHub and **select this repository**
-3. Configure the deployment:
-   - **Server name:** e.g. `kiki-virus` (becomes part of your URL)
-   - **Entrypoint:** `server.py:mcp`
-   - **Description:** optional
-   - **Authentication:** enable for private/team use; Horizon handles OAuth 2.1
-4. Click **Deploy Server** — live in ~60 seconds
+**Safe tools for hosted testing:** `get_virus_metadata`, `count_virus_sequences`, `search_proteins`, `count_proteins`, `get_protein`, `map_protein_ids`
 
-Your URL will look like:
-
-```
-https://kiki-virus.fastmcp.app/mcp
-```
-
-Horizon auto-redeploys on every push to `main`. Pull requests get preview URLs.
-
-### Test on Horizon
-
-In the Horizon dashboard:
-
-- **Inspector** — run each tool with inputs and inspect JSON output
-- **ChatMCP** — chat against the server to verify end-to-end behavior
-
-Start with `get_virus_metadata` + accession `NC_045512.2` (no downloads).
-
-### Connect clients to Horizon
-
-**Cursor** (HTTP):
-
-```json
-{
-  "mcpServers": {
-    "kiki": {
-      "url": "https://YOUR-SERVER-NAME.fastmcp.app/mcp"
-    }
-  }
-}
-```
-
-**Python client:**
-
-```python
-from fastmcp import Client
-
-client = Client("https://YOUR-SERVER-NAME.fastmcp.app/mcp")
-```
-
-If authentication is enabled, Horizon provides OAuth — follow the connection snippets in the dashboard.
-
-### Note on `retrieve_virus_dataset`
-
-Downloads write to the container filesystem on Horizon. Prefer **`get_virus_metadata`** for hosted testing. Dataset downloads are better suited to local/self-hosted runs unless you add persistent storage later.
+**Dataset tools** (`retrieve_virus_dataset`, `retrieve_protein_dataset`) write to the container filesystem — prefer local/self-hosted runs unless you add persistent storage.
 
 ---
 
@@ -425,15 +608,15 @@ Downloads write to the container filesystem on Horizon. Prefer **`get_virus_meta
 
 ```
 kiki/
-  server.py          # FastMCP app
-  cli.py             # kiki serve
-  tools/             # MCP tool definitions
-  services/          # NCBI + gget wrappers
-  models/            # QueryManifest + ToolResponse
-  query/             # normalize, validate, presets
-  errors.py          # KikiError codes
-  audit/             # Reproducibility logs
+  server.py              # FastMCP app
+  cli.py                 # kiki serve
+  tools/                 # MCP tool definitions (virus + uniprot)
+  services/              # gget + UniProt REST clients
+  models/                # QueryManifest
+  query/                 # normalize, validate, presets
+  errors.py              # KikiError codes
 tests/
+server.py                # Horizon entrypoint (imports kiki.server.mcp)
 ```
 
-See `notebook.md` for roadmap and strategy.
+See `notebook.md` for roadmap and `gget_virus_docs.md` for full gget.virus parameter reference.

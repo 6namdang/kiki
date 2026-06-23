@@ -1,3 +1,4 @@
+from kiki.audit.gget_provenance import build_metadata_execution_audit
 from kiki.services.ncbi import fetch_virus_metadata_query
 from kiki.tools._errors import tool_safe
 from kiki.tools._params import metadata_filter_kwargs
@@ -64,8 +65,9 @@ def register_metadata_tools(mcp) -> None:
                 f"Fetched {result['total_fetched']} metadata records via gget pagination. "
                 f"Returning {result['returned']} inline preview. No sequences downloaded."
             ),
-            provenance_extra={
-                "pagination_complete": result["pagination_complete"],
-                "deferred_filters": result.get("deferred_filters"),
-            },
+            provenance_extra=build_metadata_execution_audit(
+                filters=filters,
+                deferred_filters=result.get("deferred_filters"),
+                pagination_complete=result["pagination_complete"],
+            ),
         )

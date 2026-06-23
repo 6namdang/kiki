@@ -1,3 +1,4 @@
+from kiki.audit.gget_provenance import build_dataset_execution_audit
 from kiki.services.gget_virus import run_virus_dataset
 from kiki.tools._errors import tool_safe
 from kiki.tools._params import virus_filter_kwargs
@@ -159,5 +160,8 @@ def register_dataset_tools(mcp) -> None:
             engine="gget.virus",
             operation="dataset_download",
             message=message,
-            provenance_extra={"file_count": result["file_count"]},
+            provenance_extra=build_dataset_execution_audit(
+                filters=filters,
+                dataset_manifest=result["manifest"],
+            ),
         )
