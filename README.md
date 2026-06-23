@@ -1,6 +1,6 @@
 # Kiki
 
-MCP server for **deterministic biological data retrieval** — NCBI Virus (via gget) and UniProt (via REST API).
+MCP server for **deterministic biological data retrieval** — NCBI Virus (via gget), Ensembl (via gget seq/search/info/ref), and UniProt (via REST API).
 
 Agents call Kiki tools to query metadata, count records, retrieve datasets, or map identifiers. Every successful response uses a **QueryManifest** envelope with a deterministic `query_id`, structured `result`, and `provenance` block. Errors return stable machine-readable codes.
 
@@ -70,19 +70,24 @@ kiki serve --transport stdio
 
 ## Tools reference
 
-Kiki exposes **8 tools** across two data sources. Use the safe query/count tools for exploration; use dataset tools only when you intend to write files to disk.
+Kiki exposes **14 tools** across three data sources. Use the safe query/count tools for exploration; use dataset tools only when you intend to write files to disk.
 
 | # | Tool | Source | Purpose | Writes files? |
 |---|------|--------|---------|---------------|
 | 1 | [`get_virus_metadata`](#1-get_virus_metadata) | NCBI Virus / gget | Paginated metadata search + inline preview | No |
 | 2 | [`count_virus_sequences`](#2-count_virus_sequences) | NCBI Virus / gget | Count metadata records | No |
 | 3 | [`retrieve_virus_dataset`](#3-retrieve_virus_dataset) | NCBI Virus / gget | Full sequence dataset (FASTA/CSV/JSONL) | **Yes** |
-| 4 | [`search_proteins`](#4-search_proteins) | UniProt REST | Paginated protein search + inline preview | No |
-| 5 | [`count_proteins`](#5-count_proteins) | UniProt REST | Count matching proteins | No |
-| 6 | [`get_protein`](#6-get_protein) | UniProt REST | Single accession lookup | No |
-| 7 | [`retrieve_protein_dataset`](#7-retrieve_protein_dataset) | UniProt REST | Bulk FASTA download | **Yes** |
-| 8 | [`map_protein_ids`](#8-map_protein_ids) | UniProt REST | Cross-database ID mapping | No |
-| 9 | [`get_query_history`](#9-get_query_history) | Kiki audit log | Inspect prior QueryManifest runs | No |
+| 4 | [`get_sequence`](#4-get_sequence) | Ensembl / gget | Single gene/transcript FASTA | No |
+| 5 | [`retrieve_sequence_batch`](#5-retrieve_sequence_batch) | Ensembl / gget | Multi-ID sequence fetch (+ optional FASTA file) | Optional |
+| 6 | [`search_genes`](#6-search_genes) | Ensembl / gget | Gene search by text terms | No |
+| 7 | [`get_gene_info`](#7-get_gene_info) | Ensembl / gget | Gene/transcript metadata + cross-refs | No |
+| 8 | [`get_reference`](#8-get_reference) | Ensembl / gget | Reference genome FTP metadata | No |
+| 9 | [`search_proteins`](#9-search_proteins) | UniProt REST | Paginated protein search + inline preview | No |
+| 10 | [`count_proteins`](#10-count_proteins) | UniProt REST | Count matching proteins | No |
+| 11 | [`get_protein`](#11-get_protein) | UniProt REST | Single accession lookup | No |
+| 12 | [`retrieve_protein_dataset`](#12-retrieve_protein_dataset) | UniProt REST | Bulk FASTA download | **Yes** |
+| 13 | [`map_protein_ids`](#13-map_protein_ids) | UniProt REST | Cross-database ID mapping | No |
+| 14 | [`get_query_history`](#14-get_query_history) | Kiki audit log | Inspect prior QueryManifest runs | No |
 
 ### Shared behavior
 
@@ -326,11 +331,96 @@ With preset:
 
 ---
 
+## Ensembl tools (gget seq / search / info / ref)
+
+Gene and reference genome retrieval via [gget](https://github.com/pachterlab/gget) against the Ensembl REST API. Sequences are returned inline as parsed FASTA records (`header`, `sequence`, `length`).
+
+### 4. `get_sequence`
+
+Fetch one Ensembl gene or transcript ID. Set `translate=true` for amino acid sequences; `isoforms=true` for all transcript isoforms of a gene.
+
+**Example**
+
+```json
+{ "ensembl_id": "ENSG00000012048" }
+```
+
+Transcript with protein sequence:
+
+```json
+{ "ensembl_id": "ENST00000357654", "translate": true }
+```
+
+---
+
+### 5. `retrieve_sequence_batch`
+
+Fetch multiple Ensembl IDs in one call (max 50). Returns inline FASTA records. Pass `confirm_download=true` to also write `sequences.fasta` to disk.
+
+**Example**
+
+```json
+{
+  "ensembl_ids": ["ENSG00000012048", "ENSG00000139618"],
+  "isoforms": false
+}
+```
+
+---
+
+### 6. `search_genes`
+
+Search Ensembl by free-text terms. `species` uses `genus_species` format (e.g. `homo_sapiens`).
+
+**Example**
+
+```json
+{ "searchwords": "BRCA1", "species": "homo_sapiens", "limit": 5 }
+```
+
+Multi-term OR search:
+
+```json
+{ "searchwords": ["TP53", "p53"], "species": "homo_sapiens", "andor": "or" }
+```
+
+---
+
+### 7. `get_gene_info`
+
+Metadata and cross-references (Ensembl, NCBI, UniProt, optional PDB) for one or more Ensembl IDs.
+
+**Example**
+
+```json
+{ "ensembl_id": "ENSG00000012048", "pdb": false }
+```
+
+---
+
+### 8. `get_reference`
+
+Reference genome annotation FTP links (GTF, cDNA, DNA, etc.) — metadata only, no download.
+
+**Example**
+
+```json
+{ "species": "homo_sapiens", "which": "gtf" }
+```
+
+List available species:
+
+```json
+{ "list_species": true }
+```
+
+---
+
 ## UniProt tools
 
 Powered by the [UniProt REST API](https://rest.uniprot.org). All search/count/dataset tools default to **`reviewed:true`** (Swiss-Prot). Pass `"include_unreviewed": true` to include TrEMBL. Large organisms (e.g. human `9606`) require narrowing filters for dataset downloads.
 
-### 4. `search_proteins`
+### 9. `search_proteins`
 
 Search UniProtKB with cursor pagination. Returns up to `preview_limit` summarized records inline plus `total_available`. **Does not download sequences.**
 
@@ -376,7 +466,7 @@ With preset:
 
 ---
 
-### 5. `count_proteins`
+### 10. `count_proteins`
 
 Count UniProtKB entries via `X-Total-Results` (single API request). Same filters as `search_proteins`.
 
@@ -394,7 +484,7 @@ Count UniProtKB entries via `X-Total-Results` (single API request). Same filters
 
 ---
 
-### 6. `get_protein`
+### 11. `get_protein`
 
 Retrieve a single UniProtKB entry by accession. No search filters needed.
 
@@ -424,7 +514,7 @@ Raw FASTA:
 
 ---
 
-### 7. `retrieve_protein_dataset`
+### 12. `retrieve_protein_dataset`
 
 Download all matching protein sequences as FASTA to disk. Paginates through every result page. **Requires `confirm_download: true`.**
 
@@ -463,7 +553,7 @@ Download all matching protein sequences as FASTA to disk. Paginates through ever
 
 ---
 
-### 8. `map_protein_ids`
+### 13. `map_protein_ids`
 
 Map protein identifiers across databases via the UniProt ID mapping service.
 
@@ -500,7 +590,7 @@ List supported databases:
 
 ---
 
-### 9. `get_query_history`
+### 14. `get_query_history`
 
 Inspect prior tool runs stored in the local audit log (`KIKI_AUDIT_DIR/manifest_history.jsonl`). Every successful tool call is recorded with its full QueryManifest so agents can verify *how* a result was produced.
 
@@ -564,8 +654,9 @@ async def main():
     async with client:
         tools = await client.list_tools()
         print([t.name for t in tools])
-        # All 8 tools:
+        # All 14 tools:
         # get_virus_metadata, count_virus_sequences, retrieve_virus_dataset,
+        # get_sequence, retrieve_sequence_batch, search_genes, get_gene_info, get_reference,
         # search_proteins, count_proteins, get_protein,
         # retrieve_protein_dataset, map_protein_ids, get_query_history
 
@@ -603,7 +694,7 @@ fastmcp inspect server.py:mcp
 3. Set entrypoint `server.py:mcp`, deploy
 4. URL: `https://YOUR-SERVER-NAME.fastmcp.app/mcp`
 
-**Safe tools for hosted testing:** `get_virus_metadata`, `count_virus_sequences`, `search_proteins`, `count_proteins`, `get_protein`, `map_protein_ids`
+**Safe tools for hosted testing:** `get_virus_metadata`, `count_virus_sequences`, `search_genes`, `get_gene_info`, `get_sequence`, `get_reference`, `search_proteins`, `count_proteins`, `get_protein`, `map_protein_ids`
 
 **Dataset tools** (`retrieve_virus_dataset`, `retrieve_protein_dataset`) write to the container filesystem — prefer local/self-hosted runs unless you add persistent storage.
 
@@ -615,7 +706,7 @@ fastmcp inspect server.py:mcp
 kiki/
   server.py              # FastMCP app
   cli.py                 # kiki serve
-  tools/                 # MCP tool definitions (virus + uniprot)
+  tools/                 # MCP tool definitions (virus + ensembl + uniprot)
   services/              # gget + UniProt REST clients
   models/                # QueryManifest
   query/                 # normalize, validate, presets

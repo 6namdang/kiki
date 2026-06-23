@@ -21,7 +21,7 @@ This repo builds **Kiki** — an MCP server for deterministic biological data re
 
 ```
 kiki/tools/       MCP tools
-kiki/services/    gget + UniProt clients
+kiki/services/    gget (virus + ensembl) + UniProt clients
 kiki/query/       presets, validate, normalize
 kiki/audit/       provenance, history, deferred filter explanations
 server.py         Horizon deploy entrypoint
