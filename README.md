@@ -19,6 +19,8 @@ pip install -e ".[dev]"
 kiki serve --help
 ```
 
+**Contributing:** see [CONTRIBUTING.md](CONTRIBUTING.md) for architecture, coding rules, and PR workflow.
+
 ---
 
 ## Run the server
@@ -106,9 +108,12 @@ Kiki exposes **8 tools** across two data sources. Use the safe query/count tools
 
 | Variable | Effect |
 |----------|--------|
-| `KIKI_OUTPUT_DIR` | Override default download directory |
-| `KIKI_AUDIT_DIR` | Override manifest audit log directory (default: `./kiki_audit`) |
+| `KIKI_OUTPUT_DIR` | Override default download directory (auto-fallback to `/tmp/kiki_output` if not writable) |
+| `KIKI_AUDIT_DIR` | Override manifest audit log directory (default: `./kiki_audit`, auto-fallback to `/tmp/kiki_audit` if not writable) |
+| `KIKI_RECORD_HISTORY` | Set to `false` to disable audit log writes (default: `true`) |
 | `NCBI_API_KEY` | Forwarded to gget for NCBI Virus tools |
+
+On read-only hosted runtimes (e.g. Horizon), audit logs and dataset downloads automatically fall back to `/tmp/kiki_audit` and `/tmp/kiki_output`. Tool calls never fail solely because audit logging failed.
 
 **Audit & reproducibility** — virus tool responses include enriched `provenance`:
 

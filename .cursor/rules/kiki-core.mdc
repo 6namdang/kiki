@@ -1,0 +1,30 @@
+---
+description: Kiki core architecture and non-negotiable collaboration rules
+alwaysApply: true
+---
+
+# Kiki core rules
+
+MCP server for deterministic biological data retrieval (gget virus + UniProt REST).
+
+## Architecture
+
+- `kiki/tools/` — MCP layer only (`@mcp.tool`, `@tool_safe`, manifests)
+- `kiki/services/` — gget/UniProt I/O; no MCP imports
+- `kiki/query/` — presets, validation, `query_id` normalization
+- Horizon entrypoint: **`server.py:mcp`** (repo root), not `kiki/server.py:mcp`
+
+## Must follow
+
+1. Success → `success_manifest()` or `uniprot_success_manifest()` (QueryManifest envelope)
+2. Guardrails → `KikiError` + `ErrorCode`; tools wrapped with `@tool_safe`
+3. Disk writes → `confirm_download=true` for datasets; audit/history never crashes tools
+4. Broad queries → `validate_query_scope` / `validate_uniprot_scope`
+5. Tests/docs → safe queries only (`NC_045512.2`, presets); no unfiltered large taxon downloads
+6. Minimal diffs; match existing conventions; Python 3.12+ type hints
+
+## Do not commit
+
+`.env`, `venv/`, `kiki_output/`, `kiki_audit/`, secrets, private benchmark CSVs.
+
+See `CONTRIBUTING.md` for full collaboration guide.

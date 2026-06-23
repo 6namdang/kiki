@@ -11,6 +11,7 @@ from kiki.errors import ErrorCode, KikiError
 from kiki.query.validate import validate_filters
 from kiki.services.command_summary import parse_command_summary
 from kiki.services.filters import validate_query_scope, virus_kwargs
+from kiki.services.output_paths import output_root as resolve_output_root
 
 
 def build_output_dir(root: Path, query: str) -> Path:
@@ -26,15 +27,16 @@ def resolve_outfolder(
     *,
     query: str,
     outfolder: str | None,
-    output_root: Path | None,
+    output_root_override: Path | None,
 ) -> Path:
     if outfolder:
         path = Path(outfolder).expanduser()
         path.mkdir(parents=True, exist_ok=True)
         return path
 
-    root = output_root or Path(os.environ.get("KIKI_OUTPUT_DIR", DEFAULT_OUTPUT_ROOT))
-    return build_output_dir(root, query)
+    root, _ = resolve_output_root()
+    chosen = output_root_override if output_root_override is not None else root
+    return build_output_dir(chosen, query)
 
 
 def list_files(directory: Path) -> list[str]:
@@ -109,7 +111,7 @@ def run_virus_dataset(
     outfolder = resolve_outfolder(
         query=query,
         outfolder=filters.get("outfolder"),
-        output_root=output_root,
+        output_root_override=output_root,
     )
 
     gget_args = virus_kwargs(filters)

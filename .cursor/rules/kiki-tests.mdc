@@ -1,0 +1,29 @@
+---
+description: Testing conventions for Kiki
+globs: tests/**/*.py
+alwaysApply: false
+---
+
+# Tests
+
+## Requirements
+
+- Run `pytest` before every PR; all tests must pass
+- New validation/mapping → unit test (no network)
+- New MCP tool → async in-process test with `fastmcp.Client` + `create_server()`
+
+## Safe integration queries
+
+```python
+{"query": "NC_045512.2", "is_accession": True}
+{"preset": "sars_cov2_ref_genome"}
+{"accession": "P01308"}  # UniProt
+```
+
+Never integration-test unfiltered SARS-CoV-2 (`2697049`) or full dataset downloads without explicit maintainer approval.
+
+## Patterns
+
+- Use `tmp_path` + `monkeypatch.setenv("KIKI_AUDIT_DIR", ...)` for audit tests
+- Reproducibility: same params × 3 → identical `query_id` and count
+- `@pytest.mark.asyncio` for MCP client tests

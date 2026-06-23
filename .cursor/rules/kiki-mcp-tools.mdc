@@ -1,0 +1,35 @@
+---
+description: MCP tool layer conventions for kiki/tools
+globs: kiki/tools/**/*.py
+alwaysApply: false
+---
+
+# MCP tools (`kiki/tools/`)
+
+## Pattern
+
+```python
+@mcp.tool(name="tool_name")  # explicit name if fn ends in _tool
+@tool_safe
+def my_tool(query: str | None = None, ...) -> dict:
+    params = build_query_params(...)  # or build_uniprot_params
+    filters = extract_filters(params)
+    result = service_call(...)
+    return success_manifest(
+        tool="my_tool",
+        params=params,
+        result={...},
+        engine="gget.fetch_virus_metadata",
+        operation="metadata_paginated",
+        message="...",
+        provenance_extra=build_metadata_execution_audit(...),
+    )
+```
+
+## Rules
+
+- Register in `register_*_tools(mcp)` and wire in `kiki/tools/__init__.py`
+- Virus tools: `build_query_params`, `extract_filters`, `success_manifest`
+- UniProt tools: `build_uniprot_params`, `uniprot_success_manifest`
+- Do not call gget/requests directly from tools — use `kiki/services/`
+- Document new tools in `README.md` with example JSON args

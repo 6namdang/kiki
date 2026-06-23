@@ -1,0 +1,31 @@
+---
+description: Service layer conventions for gget and UniProt clients
+globs: kiki/services/**/*.py
+alwaysApply: false
+---
+
+# Services (`kiki/services/`)
+
+## Responsibility
+
+Network calls, pagination, file output, command_summary parsing. **No FastMCP imports.**
+
+## Virus (gget)
+
+- Map filters via `virus_kwargs()` / `metadata_kwargs()` in `filters.py`
+- Full pagination before returning counts or previews
+- Dataset: parse `command_summary.txt` failures; never hide partial failures
+
+## UniProt
+
+- Base URL: `https://rest.uniprot.org` (`kiki/config.py`)
+- Search pagination via `Link: rel="next"` cursor headers
+- ID mapping: run → poll status → results (handle status payload variants)
+
+## Writable paths
+
+Use `resolve_writable_dir()` / `output_root()` — hosted `/app` is read-only; fallback `/tmp/kiki_*`.
+
+## Errors
+
+Raise `KikiError(ErrorCode.UPSTREAM_ERROR, ...)` for API failures; `NOT_FOUND` for 404 accessions.

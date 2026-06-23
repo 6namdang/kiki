@@ -2,7 +2,7 @@ import os
 from datetime import UTC, datetime
 from pathlib import Path
 
-from kiki.config import DEFAULT_OUTPUT_ROOT
+from kiki.services.output_paths import output_root as resolve_output_root
 from kiki.services.uniprot import count_proteins, download_fasta_dataset
 from kiki.tools._errors import tool_safe
 from kiki.tools.uniprot._helpers import (
@@ -20,7 +20,7 @@ def _build_output_path(query_label: str, outfolder: str | None) -> Path:
         path.mkdir(parents=True, exist_ok=True)
         return path / "proteins.fasta"
 
-    root = Path(os.environ.get("KIKI_OUTPUT_DIR", DEFAULT_OUTPUT_ROOT))
+    root, _ = resolve_output_root()
     timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     safe = "".join(char if char.isalnum() else "_" for char in query_label)[:40]
     out_dir = root / f"uniprot_{safe}_{timestamp}"

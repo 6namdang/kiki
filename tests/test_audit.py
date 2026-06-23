@@ -2,6 +2,7 @@ import pytest
 
 from kiki.audit.deferred_filters import explain_filter_application
 from kiki.audit.history import get_manifest_by_query_id, query_history, record_manifest
+from kiki.audit.paths import FALLBACK_AUDIT_DIR
 from kiki.services.command_summary import parse_command_summary, summarize_command_summary
 
 
@@ -74,3 +75,57 @@ def test_manifest_history_roundtrip(tmp_path, monkeypatch) -> None:
     found = get_manifest_by_query_id("abc123")
     assert found is not None
     assert found["manifest"]["result"]["count"] == 5
+
+
+def test_record_manifest_survives_read_only_primary(tmp_path, monkeypatch) -> None:
+    read_only = tmp_path / "readonly"
+    read_only.mkdir()
+    read_only.chmod(0o555)
+
+    fallback = tmp_path / "fallback_audit"
+    monkeypatch.setenv("KIKI_AUDIT_DIR", str(read_only))
+    monkeypatch.setattr(
+        "kiki.audit.history.FALLBACK_AUDIT_DIR",
+        fallback,
+    )
+
+    manifest = {"query_id": "xyz", "tool": "get_virus_metadata", "success": True}
+    record = record_manifest(manifest)
+    assert record["recorded"] is True
+    assert "fallback" in record.get("note", "").lower() or str(fallback) in record["history_path"]
+
+    read_only.chmod(0o755)
+
+
+def test_record_manifest_disabled(monkeypatch) -> None:
+    monkeypatch.setenv("KIKI_RECORD_HISTORY", "false")
+    record = record_manifest({"query_id": "x", "tool": "t", "success": True})
+    assert record["recorded"] is False
+    assert "disabled" in record["reason"].lower()
+
+
+def test_record_manifest_survives_read_only_primary(tmp_path, monkeypatch) -> None:
+    """Simulates Horizon: primary audit dir read-only, fallback must succeed."""
+    read_only = tmp_path / "readonly"
+    read_only.mkdir()
+    read_only.chmod(0o555)
+
+    fallback = tmp_path / "fallback_audit"
+    monkeypatch.setenv("KIKI_AUDIT_DIR", str(read_only))
+    monkeypatch.setattr("kiki.audit.history.FALLBACK_AUDIT_DIR", fallback)
+
+    manifest = {"query_id": "horizon1", "tool": "get_virus_metadata", "success": True}
+    record = record_manifest(manifest)
+
+    assert record["recorded"] is True
+    assert "horizon1" == record["query_id"]
+    assert str(fallback) in record["history_path"]
+
+    read_only.chmod(0o755)
+
+
+def test_record_manifest_disabled(monkeypatch) -> None:
+    monkeypatch.setenv("KIKI_RECORD_HISTORY", "false")
+    record = record_manifest({"query_id": "x", "tool": "t", "success": True})
+    assert record["recorded"] is False
+    assert "disabled" in record["reason"].lower()
