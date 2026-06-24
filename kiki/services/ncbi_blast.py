@@ -143,6 +143,7 @@ def submit_blast_search(
         "rtoe_seconds": rtoe,
         "program": program,
         "database": database,
+        "api_sequence": ["blast_put"],
     }
 
 
@@ -275,6 +276,7 @@ def get_blast_results_once(rid: str) -> dict[str, Any]:
         "status": agent_status,
         "rid": rid,
         "ncbi_status": ncbi_status,
+        "api_sequence": ["blast_searchinfo"],
     }
 
     if agent_status == "running":
@@ -303,5 +305,6 @@ def get_blast_results_once(rid: str) -> dict[str, Any]:
     payload = fetch_blast_results_json(rid)
     parsed = parse_blast_hits(payload)
     base.update(parsed)
+    base["api_sequence"] = ["blast_searchinfo", "blast_json2"]
     base["message"] = f"BLAST search completed with {parsed['num_hits']} hit(s)."
     return base

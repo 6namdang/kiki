@@ -44,6 +44,15 @@ Network calls, pagination, file output, command_summary parsing. **No FastMCP im
 - Enforce `NCBI_BLAST_MIN_INTERVAL` (default 3s); optional `NCBI_API_KEY`, `NCBI_BLAST_EMAIL`
 - 50 KB inline FASTA cap; RIDs ephemeral (~24h) — document in tool docstrings
 
+## ENA (Portal + Browser APIs)
+
+- Client: `kiki/services/ena.py` — Portal `/count` + `/search`, Browser `/fasta` + `/embl`
+- Hardcoded order — sequences: Portal `/count` → Portal `/search` (`limit=0`) → Browser in 10k-accession chunks; read_run: Portal only (FASTQ/submitted FTP links)
+- Totals via Portal `/count`; never trust the silent 100000-row default (use `limit=0` for full set)
+- v1 result allowlist: `sequence`, `read_run`; scope guard requires `tax_eq`/`tax_tree`/accession field
+- Enforce `ENA_MIN_INTERVAL` (default 0.05s); map HTTP 429 to `UPSTREAM_ERROR`
+- Four MCP tools: `count_ena_records`, `search_ena_records`, `get_ena_sequence`, `retrieve_ena_dataset`
+
 Use `resolve_writable_dir()` / `output_root()` — hosted `/app` is read-only; fallback `/tmp/kiki_*`.
 
 ## Errors

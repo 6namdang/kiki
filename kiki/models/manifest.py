@@ -54,6 +54,8 @@ def build_provenance(
         engine_version = "eutils.ncbi.nlm.nih.gov"
     elif engine.startswith("uniprot"):
         engine_version = "rest.uniprot.org"
+    elif engine.startswith("ena"):
+        engine_version = "ebi.ac.uk/ena"
     else:
         engine_version = _package_version(engine)
     provenance: dict[str, Any] = {

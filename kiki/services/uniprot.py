@@ -16,6 +16,7 @@ from kiki.config import (
     UNIPROT_REQUEST_TIMEOUT,
 )
 from kiki.errors import ErrorCode, KikiError
+from kiki.services.pagination import pagination_meta
 
 SESSION = requests.Session()
 SESSION.headers.update({"User-Agent": "kiki-mcp/0.1 (https://github.com/kiki)"})
@@ -80,6 +81,38 @@ def _cursor_from_url(url: str) -> str | None:
     return values[0] if values else None
 
 
+def _paginate_json_results(
+    path: str,
+    *,
+    params: dict[str, Any],
+    max_records: int | None = None,
+) -> tuple[list[dict[str, Any]], int, int, bool]:
+    """Fetch UniProt search pages until max_records or total is reached.
+
+    Returns (records, total_available, pages_fetched, pagination_complete).
+    """
+    response = _request("GET", path, params=params)
+    total = int(response.headers.get("X-Total-Results", "0"))
+    payload = response.json()
+    records = list(payload.get("results", []))
+    pages_fetched = 1
+
+    target = total if max_records is None else min(max_records, total)
+    cursor = _cursor_from_url(_parse_link_header(response.headers.get("Link")))
+    while cursor and len(records) < target:
+        page = _request("GET", path, params={**params, "cursor": cursor})
+        page_payload = page.json()
+        records.extend(page_payload.get("results", []))
+        pages_fetched += 1
+        cursor = _cursor_from_url(_parse_link_header(page.headers.get("Link")))
+
+    if max_records is not None:
+        records = records[:max_records]
+
+    complete = len(records) >= total or total == 0
+    return records, total, pages_fetched, complete
+
+
 def search_proteins(
     query: str,
     *,
@@ -88,36 +121,34 @@ def search_proteins(
     fetch_all: bool = False,
 ) -> dict[str, Any]:
     """Search UniProtKB with cursor pagination."""
-    size = min(max(1, UNIPROT_MAX_PAGE_SIZE if fetch_all else preview_limit), UNIPROT_MAX_PAGE_SIZE)
+    page_size = UNIPROT_MAX_PAGE_SIZE if fetch_all else min(max(1, preview_limit), UNIPROT_MAX_PAGE_SIZE)
     params: dict[str, Any] = {
         "query": query,
         "format": "json",
-        "size": size,
+        "size": page_size,
     }
     if fields:
         params["fields"] = ",".join(fields)
 
-    response = _request("GET", "/uniprotkb/search", params=params)
-    total = int(response.headers.get("X-Total-Results", "0"))
-    payload = response.json()
-    records = payload.get("results", [])
-
-    if fetch_all and total > len(records):
-        cursor = _cursor_from_url(_parse_link_header(response.headers.get("Link")))
-        while cursor and len(records) < total:
-            page_params = {**params, "cursor": cursor}
-            page = _request("GET", "/uniprotkb/search", params=page_params)
-            page_payload = page.json()
-            records.extend(page_payload.get("results", []))
-            cursor = _cursor_from_url(_parse_link_header(page.headers.get("Link")))
-
-    returned = min(len(records), preview_limit) if not fetch_all else len(records)
-    preview = records[:preview_limit] if not fetch_all else records
+    max_records = None if fetch_all else preview_limit
+    records, total, pages_fetched, complete = _paginate_json_results(
+        "/uniprotkb/search",
+        params=params,
+        max_records=max_records,
+    )
+    preview = records if fetch_all else records[:preview_limit]
+    meta = pagination_meta(
+        total_available=total,
+        retrieved=len(preview),
+        pages_fetched=pages_fetched,
+        complete=complete,
+    )
     return {
         "total_available": total,
-        "returned": returned,
+        "returned": len(preview),
         "records": _summarize_records(preview),
-        "pagination_complete": len(records) >= total or total == 0,
+        **meta,
+        "api_sequence": ["search"],
     }
 
 
@@ -132,6 +163,8 @@ def count_proteins(query: str) -> dict[str, Any]:
     return {
         "count": total,
         "pagination_complete": True,
+        "pages_fetched": 1,
+        "api_sequence": ["search"],
     }
 
 
@@ -158,18 +191,21 @@ def get_protein(accession: str, *, format: str = "json") -> dict[str, Any]:
     }
 
 
-def iter_fasta_pages(query: str) -> Iterator[str]:
-    """Yield FASTA text pages for a query."""
+def iter_fasta_pages(query: str) -> tuple[Iterator[str], dict[str, Any]]:
+    """Yield FASTA text pages; return pagination metadata from the first response."""
     params: dict[str, Any] = {
         "query": query,
         "format": "fasta",
         "size": UNIPROT_MAX_PAGE_SIZE,
     }
     response = _request("GET", "/uniprotkb/search", params=params, accept_json=False)
+    total = int(response.headers.get("X-Total-Results", "0"))
+    pages: list[str] = []
     if response.text.strip():
-        yield response.text
+        pages.append(response.text)
 
     cursor = _cursor_from_url(_parse_link_header(response.headers.get("Link")))
+    pages_fetched = 1
     while cursor:
         page = _request(
             "GET",
@@ -177,24 +213,42 @@ def iter_fasta_pages(query: str) -> Iterator[str]:
             params={**params, "cursor": cursor},
             accept_json=False,
         )
+        pages_fetched += 1
         if page.text.strip():
-            yield page.text
+            pages.append(page.text)
         cursor = _cursor_from_url(_parse_link_header(page.headers.get("Link")))
+
+    def _iter() -> Iterator[str]:
+        yield from pages
+
+    meta = pagination_meta(
+        total_available=total,
+        retrieved=total,
+        pages_fetched=pages_fetched,
+        complete=True,
+    )
+    return _iter(), {**meta, "api_sequence": ["search_fasta"]}
 
 
 def download_fasta_dataset(query: str, output_path: str) -> dict[str, Any]:
     """Download all FASTA records for a query to a file."""
+    pages, meta = iter_fasta_pages(query)
     sequence_count = 0
     with open(output_path, "w", encoding="utf-8") as handle:
-        for page in iter_fasta_pages(query):
+        for page in pages:
             if not page.endswith("\n"):
                 page += "\n"
             handle.write(page)
             sequence_count += page.count("\n>")
 
+    expected = meta.get("total_available", sequence_count)
     return {
         "fasta_path": output_path,
         "sequence_count": sequence_count,
+        "expected_count": expected,
+        "pages_fetched": meta["pages_fetched"],
+        "pagination_complete": sequence_count >= expected or expected == 0,
+        "api_sequence": meta["api_sequence"],
     }
 
 
@@ -256,6 +310,8 @@ def map_protein_ids(
             "mapped_count": len(mappings),
             "mappings": mappings,
             "failed": status_payload.get("failed", []),
+            "api_sequence": ["idmapping_run", "idmapping_status"],
+            "pagination_complete": True,
         }
 
     results_response = _request(
@@ -272,6 +328,8 @@ def map_protein_ids(
         "mapped_count": len(mappings),
         "mappings": mappings,
         "failed": payload.get("failed", []),
+        "api_sequence": ["idmapping_run", "idmapping_status", "idmapping_results"],
+        "pagination_complete": True,
     }
 
 

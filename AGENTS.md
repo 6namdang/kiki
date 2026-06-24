@@ -22,7 +22,7 @@ This repo builds **Kiki** — an MCP server for deterministic biological data re
 
 ```
 kiki/tools/       MCP tools
-kiki/services/    gget (virus) + ncbi eutils (genome) + ncbi blast + ensembl REST/SQL + UniProt
+kiki/services/    gget (virus) + ncbi eutils (genome) + ncbi blast + ensembl REST/SQL + UniProt + ENA (portal/browser)
 kiki/query/       presets, validate, normalize
 kiki/audit/       provenance, history, deferred filter explanations
 server.py         Horizon deploy entrypoint

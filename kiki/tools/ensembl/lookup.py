@@ -69,6 +69,12 @@ def register_ensembl_lookup_tools(mcp) -> None:
                 f"Found {result['returned']} Ensembl match(es) for {species} "
                 f"(release {ens_release})."
             ),
+            provenance_extra={
+                "pagination_complete": result.get("pagination_complete"),
+                "truncated": result.get("truncated", False),
+                "limit_applied": result.get("limit_applied"),
+                "api_sequence": result.get("api_sequence"),
+            },
         )
 
     @mcp.tool()

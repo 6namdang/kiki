@@ -15,12 +15,14 @@ import requests
 
 from kiki.config import (
     ENSEMBL_FTP_URL,
+    ENSEMBL_MAX_SEARCH_LIMIT,
     ENSEMBL_MYSQL_HOST,
     ENSEMBL_MYSQL_PORTS,
     ENSEMBL_REQUEST_TIMEOUT,
 )
 from kiki.errors import ErrorCode, KikiError
 from kiki.query.ensembl import resolve_ensembl_release
+from kiki.services.pagination import pagination_meta
 
 SESSION = requests.Session()
 SESSION.headers.update(
@@ -379,6 +381,9 @@ def search_genes(
         else _resolve_core_database(species_norm, ens_release)
     )
 
+    effective_limit = min(limit if limit is not None else ENSEMBL_MAX_SEARCH_LIMIT, ENSEMBL_MAX_SEARCH_LIMIT)
+    sql_limit = effective_limit + 1
+
     id_type = id_type.lower()
     table = "gene" if id_type == "gene" else "transcript"
     id_col = "gene.stable_id" if id_type == "gene" else "transcript.stable_id"
@@ -413,6 +418,7 @@ def search_genes(
             WHERE ({desc_col} LIKE %s OR xref.description LIKE %s OR xref.display_label LIKE %s
                    OR external_synonym.synonym LIKE %s OR {attrib_col} LIKE %s)
             ORDER BY ensembl_id
+            LIMIT {sql_limit}
             """
             cursor.execute(query, (like, like, like, like, like))
             frames.append(cursor.fetchall())
@@ -420,7 +426,8 @@ def search_genes(
         connection.close()
 
     if not frames:
-        return {"returned": 0, "records": [], "release": ens_release}
+        meta = pagination_meta(total_available=0, retrieved=0, pages_fetched=0, complete=True)
+        return {"returned": 0, "records": [], "release": ens_release, **meta}
 
     if andor == "and":
         id_sets = [ {row["ensembl_id"] for row in frame} for frame in frames ]
@@ -457,13 +464,24 @@ def search_genes(
         record["url"] = f"{url_prefix}{ens_id}"
         records.append(record)
 
-    if limit is not None:
-        records = records[:limit]
+    truncated = len(records) > effective_limit
+    if truncated:
+        records = records[:effective_limit]
 
+    meta = pagination_meta(
+        total_available=None,
+        retrieved=len(records),
+        pages_fetched=1,
+        complete=not truncated,
+    )
     return {
         "returned": len(records),
         "records": records,
         "release": ens_release,
+        "limit_applied": effective_limit,
+        "truncated": truncated,
+        **meta,
+        "api_sequence": ["ensembl_sql_search"],
     }
 
 

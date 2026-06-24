@@ -95,6 +95,8 @@ def register_uniprot_dataset_tools(mcp) -> None:
                 f"Expected {expected} from UniProt count."
             ),
             provenance_extra={
-                "pagination_complete": download["sequence_count"] >= expected or expected == 0,
+                "pagination_complete": download["pagination_complete"],
+                "pages_fetched": download["pages_fetched"],
+                "api_sequence": download["api_sequence"],
             },
         )

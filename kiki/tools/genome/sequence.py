@@ -32,7 +32,8 @@ def register_genome_tools(mcp) -> None:
         """
         accession = validate_nucleotide_accession(accession)
         params = {"accession": accession}
-        records = fetch_nucleotide_fasta([accession])
+        fetched = fetch_nucleotide_fasta([accession])
+        records = fetched["records"]
 
         return genome_success_manifest(
             tool="get_nucleotide_sequence",
@@ -40,9 +41,14 @@ def register_genome_tools(mcp) -> None:
             query_type="ncbi_nucleotide_accession",
             query_value=accession,
             result={"returned": len(records), "records": records},
-            engine="ncbi.eutils.efetch",
+            engine="ncbi.eutils.epost_efetch",
             operation="nucleotide_sequence",
             message=f"Retrieved nucleotide sequence for {accession} ({records[0]['length']} bp).",
+            provenance_extra={
+                "api_sequence": fetched["api_sequence"],
+                "pagination_complete": fetched["pagination_complete"],
+                "pages_fetched": fetched["pages_fetched"],
+            },
         )
 
     @mcp.tool()
@@ -108,11 +114,13 @@ def register_genome_tools(mcp) -> None:
         if outfolder:
             params["outfolder"] = outfolder
 
-        records = fetch_nucleotide_fasta(ids)
+        fetched = fetch_nucleotide_fasta(ids)
+        records = fetched["records"]
         result: dict = {
             "returned": len(records),
             "requested_accessions": len(ids),
             "records": records,
+            "pagination_complete": fetched["pagination_complete"],
         }
         message = f"Retrieved {len(records)} nucleotide sequence(s) for {len(ids)} accession(s)."
 
@@ -145,8 +153,13 @@ def register_genome_tools(mcp) -> None:
             query_type="ncbi_nucleotide_batch",
             query_value=ids,
             result=result,
-            engine="ncbi.eutils.efetch",
+            engine="ncbi.eutils.epost_efetch",
             operation="nucleotide_batch",
             message=message,
-            provenance_extra={"requested_accessions": len(ids)},
+            provenance_extra={
+                "requested_accessions": len(ids),
+                "api_sequence": fetched["api_sequence"],
+                "pagination_complete": fetched["pagination_complete"],
+                "pages_fetched": fetched["pages_fetched"],
+            },
         )

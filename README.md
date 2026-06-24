@@ -70,7 +70,7 @@ kiki serve --transport stdio
 
 ## Tools reference
 
-Kiki exposes **20 tools** across five data domains. Use the safe query/count tools for exploration; use dataset tools only when you intend to write files to disk.
+Kiki exposes **24 tools** across six data domains. Use the safe query/count tools for exploration; use dataset tools only when you intend to write files to disk.
 
 | # | Tool | Source | Purpose | Writes files? |
 |---|------|--------|---------|---------------|
@@ -93,7 +93,11 @@ Kiki exposes **20 tools** across five data domains. Use the safe query/count too
 | 17 | [`get_protein`](#17-get_protein) | UniProt REST | Single accession lookup | No |
 | 18 | [`retrieve_protein_dataset`](#18-retrieve_protein_dataset) | UniProt REST | Bulk FASTA download | **Yes** |
 | 19 | [`map_protein_ids`](#19-map_protein_ids) | UniProt REST | Cross-database ID mapping | No |
-| 20 | [`get_query_history`](#20-get_query_history) | Kiki audit log | Inspect prior QueryManifest runs | No |
+| 20 | [`count_ena_records`](#20-count_ena_records) | ENA Portal API | Verifiable count via `/count` | No |
+| 21 | [`search_ena_records`](#21-search_ena_records) | ENA Portal API | Preview metadata (sequence / read_run) | No |
+| 22 | [`get_ena_sequence`](#22-get_ena_sequence) | ENA Browser API | Single sequence by accession (FASTA/EMBL) | No |
+| 23 | [`retrieve_ena_dataset`](#23-retrieve_ena_dataset) | ENA Portal + Browser | Full dataset (Portal→Browser for sequences) | **Yes** |
+| 24 | [`get_query_history`](#24-get_query_history) | Kiki audit log | Inspect prior QueryManifest runs | No |
 
 ### Shared behavior
 
@@ -700,7 +704,82 @@ List supported databases:
 
 ---
 
-### 20. `get_query_history`
+## ENA tools (Portal + Browser APIs)
+
+The European Nucleotide Archive exposes two coordinated APIs: the **Portal API** for search and discovery (returns accessions and metadata) and the **Browser API** for record download (FASTA / EMBL by accession). Kiki hardcodes the correct order — Portal first, then Browser — so agents never call the Browser search directly or trust the silent 100000-row Portal default as a complete result. Totals always come from Portal `/count`, and full retrieval uses `limit=0`.
+
+Two result types are supported in v1: `sequence` (assembled or annotated nucleotide sequences, the direct parallel to NCBI Virus) and `read_run` (raw sequencing runs with FASTQ / submitted FTP links). ENA Portal queries must include a narrowing signal such as `tax_eq(<taxid>)`, `tax_tree(<taxid>)`, or an accession field.
+
+### 20. `count_ena_records`
+
+Count ENA records via the Portal `/count` endpoint without downloading them.
+
+**Parameters**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `result` | string | **required** | `sequence` or `read_run` |
+| `query` | string | **required** | ENA Portal query, e.g. `tax_eq(2697049)` |
+
+**Result fields:** `result`, `count`, `pagination_complete`
+
+---
+
+### 21. `search_ena_records`
+
+Preview Portal search results: the verifiable total from `/count` plus up to `preview_limit` inline metadata rows. `pagination_complete` is true only when the preview captured every matching row.
+
+**Parameters**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `result` | string | **required** | `sequence` or `read_run` |
+| `query` | string | **required** | ENA Portal query (must be narrowed) |
+| `preview_limit` | int | `25` | Inline rows to return (max 100) |
+
+**Result fields:** `result`, `total_available`, `returned`, `records[]`, `pagination_complete`
+
+---
+
+### 22. `get_ena_sequence`
+
+Fetch one assembled or annotated sequence by accession via the Browser API. This is the documented exception to the Portal-first workflow: when you already have a specific accession, no Portal search is needed.
+
+**Parameters**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `accession` | string | **required** | ENA / INSDC sequence accession, e.g. `BN000065` |
+| `format` | string | `fasta` | `fasta` (parsed records) or `embl` (flat file text) |
+
+**Result fields (FASTA):** `format`, `returned`, `records[]` (`header`, `sequence`, `length`)
+
+---
+
+### 23. `retrieve_ena_dataset`
+
+Retrieve a full ENA dataset, coordinating the two APIs deterministically:
+
+- `result="sequence"`: Portal `/count` → Portal `/search` (`limit=0`) → Browser download in 10000-accession chunks (FASTA or EMBL).
+- `result="read_run"`: Portal `/count` → Portal `/search` (`limit=0`) returning run metadata and FASTQ / submitted FTP links. No Browser step; FTP file transfer is out of scope (URLs are returned for downstream tooling).
+
+Pass `confirm_download=true` to allow retrievals larger than the safety cap and to write the dataset to disk. Without it, large queries are refused and nothing is written.
+
+**Parameters**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `result` | string | **required** | `sequence` or `read_run` |
+| `query` | string | **required** | ENA Portal query (must be narrowed) |
+| `format` | string | `fasta` | `fasta` or `embl` (sequence only) |
+| `confirm_download` | bool | `false` | Required to exceed the cap and write files |
+| `outfolder` | string | — | Output directory (requires `confirm_download`) |
+
+**Result fields:** `result`, `total_available`, `records[]`/`content`, `accessions`, `api_sequence`, `pagination_complete`
+
+---
+
+### 24. `get_query_history`
 
 Inspect prior tool runs stored in the local audit log (`KIKI_AUDIT_DIR/manifest_history.jsonl`). Every successful tool call is recorded with its full QueryManifest so agents can verify *how* a result was produced.
 
@@ -778,11 +857,14 @@ async def main():
     async with client:
         tools = await client.list_tools()
         print([t.name for t in tools])
-        # All 20 tools:
+        # All 24 tools:
         # get_virus_metadata, count_virus_sequences, retrieve_virus_dataset,
+        # get_nucleotide_sequence, get_nucleotide_metadata, get_assembly_metadata, retrieve_nucleotide_batch,
+        # submit_blast_search, get_blast_results,
         # get_sequence, retrieve_sequence_batch, search_genes, get_gene_info, get_reference,
-        # search_proteins, count_proteins, get_protein,
-        # retrieve_protein_dataset, map_protein_ids, get_query_history
+        # search_proteins, count_proteins, get_protein, retrieve_protein_dataset, map_protein_ids,
+        # count_ena_records, search_ena_records, get_ena_sequence, retrieve_ena_dataset,
+        # get_query_history
 
         # Virus metadata
         r = await client.call_tool(
@@ -818,7 +900,7 @@ fastmcp inspect server.py:mcp
 3. Set entrypoint `server.py:mcp`, deploy
 4. URL: `https://YOUR-SERVER-NAME.fastmcp.app/mcp`
 
-**Safe tools for hosted testing:** `get_virus_metadata`, `count_virus_sequences`, `get_nucleotide_sequence`, `get_nucleotide_metadata`, `get_assembly_metadata`, `search_genes`, `get_gene_info`, `get_sequence`, `get_reference`, `search_proteins`, `count_proteins`, `get_protein`, `map_protein_ids`
+**Safe tools for hosted testing:** `get_virus_metadata`, `count_virus_sequences`, `get_nucleotide_sequence`, `get_nucleotide_metadata`, `get_assembly_metadata`, `search_genes`, `get_gene_info`, `get_sequence`, `get_reference`, `search_proteins`, `count_proteins`, `get_protein`, `map_protein_ids`, `count_ena_records`, `search_ena_records`, `get_ena_sequence`
 
 **Dataset tools** (`retrieve_virus_dataset`, `retrieve_protein_dataset`) write to the container filesystem — prefer local/self-hosted runs unless you add persistent storage.
 

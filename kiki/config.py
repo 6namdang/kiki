@@ -54,3 +54,19 @@ NCBI_BLAST_MAX_HITLIST_SIZE = 500
 NCBI_BLAST_NUCL_DATABASES = frozenset({"core_nt", "refseq_rna"})
 NCBI_BLAST_PROT_DATABASES = frozenset({"swissprot", "refseq_protein"})
 NCBI_BLAST_TOOL_ID = "kiki-mcp"
+
+# ENA Portal + Browser APIs (https://ena-docs.readthedocs.io/en/latest/retrieval/programmatic-access.html)
+# Portal API: search/discovery (returns accessions); Browser API: record download (FASTA/EMBL).
+ENA_PORTAL_BASE = "https://www.ebi.ac.uk/ena/portal/api"
+ENA_BROWSER_BASE = "https://www.ebi.ac.uk/ena/browser/api"
+ENA_REQUEST_TIMEOUT = 120
+# ENA enforces 50 req/s; stay well under with a small inter-request gap.
+ENA_MIN_INTERVAL = float(os.environ.get("ENA_MIN_INTERVAL", "0.05"))
+# Preview search row cap (Kiki-side; ENA default is 100000, full set via limit=0).
+ENA_DEFAULT_PREVIEW_LIMIT = 25
+ENA_MAX_PREVIEW_LIMIT = 100
+# Browser API accepts at most 10000 accessions per request.
+ENA_BROWSER_BATCH_SIZE = 10000
+# Full-retrieval guardrail: refuse limit=0 retrieve above this without confirm_download.
+ENA_MAX_RETRIEVE_COUNT = int(os.environ.get("ENA_MAX_RETRIEVE_COUNT", "10000"))
+ENA_RESULTS_V1 = frozenset({"sequence", "read_run"})

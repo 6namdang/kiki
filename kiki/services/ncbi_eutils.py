@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import os
+import re
 import threading
 import time
+import xml.etree.ElementTree as ET
 from typing import Any
 
 import requests
@@ -17,12 +19,16 @@ from kiki.config import (
 )
 from kiki.errors import ErrorCode, KikiError
 from kiki.services.ensembl import parse_fasta_blocks
+from kiki.services.pagination import pagination_meta
 
 SESSION = requests.Session()
 SESSION.headers.update({"User-Agent": "kiki-mcp/0.1 (https://github.com/kiki)"})
 
 _EUTILS_LOCK = threading.Lock()
 _LAST_EUTILS_REQUEST_AT = 0.0
+
+WEBENV_RE = re.compile(r"<WebEnv>([^<]+)</WebEnv>")
+QUERYKEY_RE = re.compile(r"<QueryKey>([^<]+)</QueryKey>")
 
 
 def _eutils_params(extra: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -68,11 +74,59 @@ def _eutils_get(endpoint: str, *, params: dict[str, Any]) -> requests.Response:
     return response
 
 
+def _parse_epost_response(text: str) -> tuple[str, str]:
+    webenv_match = WEBENV_RE.search(text)
+    query_key_match = QUERYKEY_RE.search(text)
+    if webenv_match and query_key_match:
+        return webenv_match.group(1), query_key_match.group(1)
+    try:
+        root = ET.fromstring(text)
+        webenv = root.findtext("WebEnv")
+        query_key = root.findtext("QueryKey")
+        if webenv and query_key:
+            return webenv, query_key
+    except ET.ParseError:
+        pass
+    raise KikiError(
+        ErrorCode.UPSTREAM_ERROR,
+        "Failed to parse NCBI epost response (WebEnv / QueryKey).",
+        details={"response_preview": text[:500]},
+    )
+
+
+def _epost_ids(db: str, ids: list[str]) -> tuple[str, str]:
+    """Upload record IDs to the NCBI history server (epost)."""
+    response = _eutils_get(
+        "epost.fcgi",
+        params={"db": db, "id": ",".join(ids)},
+    )
+    return _parse_epost_response(response.text)
+
+
+def _efetch_from_history(
+    *,
+    db: str,
+    webenv: str,
+    query_key: str,
+    rettype: str,
+    retmode: str,
+) -> str:
+    response = _eutils_get(
+        "efetch.fcgi",
+        params={
+            "db": db,
+            "query_key": query_key,
+            "WebEnv": webenv,
+            "rettype": rettype,
+            "retmode": retmode,
+        },
+    )
+    return response.text
+
+
 def _parse_fasta_text(text: str) -> list[dict[str, Any]]:
-    blocks = [block for block in text.strip().split("\n") if block.strip()]
-    if not blocks:
+    if not text.strip():
         raise KikiError(ErrorCode.NOT_FOUND, "No sequence returned from NCBI.")
-    # parse_fasta_blocks expects header and sequence as separate list items when split by line
     lines = text.strip().splitlines()
     blocks_for_parser: list[str] = []
     current: list[str] = []
@@ -87,18 +141,16 @@ def _parse_fasta_text(text: str) -> list[dict[str, Any]]:
     return parse_fasta_blocks(blocks_for_parser)
 
 
-def fetch_nucleotide_fasta(accessions: list[str]) -> list[dict[str, Any]]:
-    """Fetch nucleotide FASTA for one or more accessions via efetch."""
-    response = _eutils_get(
-        "efetch.fcgi",
-        params={
-            "db": "nucleotide",
-            "id": ",".join(accessions),
-            "rettype": "fasta",
-            "retmode": "text",
-        },
-    )
-    text = response.text.strip()
+def fetch_nucleotide_fasta(accessions: list[str]) -> dict[str, Any]:
+    """Fetch nucleotide FASTA via epost → efetch (NCBI-recommended batch order)."""
+    webenv, query_key = _epost_ids("nucleotide", accessions)
+    text = _efetch_from_history(
+        db="nucleotide",
+        webenv=webenv,
+        query_key=query_key,
+        rettype="fasta",
+        retmode="text",
+    ).strip()
     if not text or text.startswith("Error"):
         raise KikiError(
             ErrorCode.NOT_FOUND,
@@ -112,7 +164,17 @@ def fetch_nucleotide_fasta(accessions: list[str]) -> list[dict[str, Any]]:
             "Failed to parse nucleotide FASTA from NCBI.",
             details={"accessions": accessions},
         )
-    return records
+    meta = pagination_meta(
+        total_available=len(accessions),
+        retrieved=len(records),
+        pages_fetched=1,
+        complete=len(records) >= len(accessions),
+    )
+    return {
+        "records": records,
+        "api_sequence": ["epost", "efetch"],
+        **meta,
+    }
 
 
 def fetch_nucleotide_summary(accession: str) -> dict[str, Any]:
@@ -146,13 +208,21 @@ def fetch_nucleotide_summary(accession: str) -> dict[str, Any]:
         "taxid": record.get("taxid"),
         "genbank_division": record.get("genbankdivision"),
         "update_date": record.get("updatedate"),
+        "api_sequence": ["esummary"],
+        "pagination_complete": True,
+        "pages_fetched": 1,
     }
 
 
 def _assembly_uid(accession: str) -> str:
     response = _eutils_get(
         "esearch.fcgi",
-        params={"db": "assembly", "term": accession, "retmode": "json"},
+        params={
+            "db": "assembly",
+            "term": f"{accession}[Assembly Accession]",
+            "retmax": 1,
+            "retmode": "json",
+        },
     )
     payload = response.json()
     idlist = payload.get("esearchresult", {}).get("idlist", [])
@@ -166,7 +236,7 @@ def _assembly_uid(accession: str) -> str:
 
 
 def fetch_assembly_summary(accession: str) -> dict[str, Any]:
-    """Fetch assembly metadata via esearch + esummary."""
+    """Fetch assembly metadata via esearch → esummary."""
     uid = _assembly_uid(accession)
     response = _eutils_get(
         "esummary.fcgi",
@@ -192,4 +262,7 @@ def fetch_assembly_summary(accession: str) -> dict[str, Any]:
         "refseq_category": record.get("refseq_category"),
         "paired_assembly": record.get("pairasmblyacc"),
         "ftp_path": record.get("ftppath_refseq") or record.get("ftppath_genbank"),
+        "api_sequence": ["esearch", "esummary"],
+        "pagination_complete": True,
+        "pages_fetched": 2,
     }

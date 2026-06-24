@@ -4,6 +4,8 @@ Kiki is an MCP server for **deterministic biological data retrieval** (NCBI Viru
 
 ## Before you start
 
+- `docs/database_retrieval.md` — pagination traps and multi-API call order per database (required for new wrappers)
+
 1. Read `README.md` (tools reference) and `notebook.md` (product vision).
 2. Python **3.12+** required.
 3. Install dev dependencies:
@@ -82,6 +84,7 @@ Large taxa / organisms require narrowing filters. Use `validate_query_scope()` (
 - Virus smoke tests: accession `NC_045512.2` or presets like `sars_cov2_ref_genome`.
 - NCBI genome smoke tests: `get_nucleotide_sequence` / `get_nucleotide_metadata` on `NC_045512.2`; `get_assembly_metadata` on `GCF_000001405.40`.
 - NCBI BLAST: unit tests + mocked validation; live submit marked `@pytest.mark.integration` (slow).
+- ENA: mock Portal `/count` + `/search` and Browser FASTA in unit tests; live `get_ena_sequence` on a small accession (e.g. `BN000065`) marked `@pytest.mark.integration`. Never run a Portal `limit=0` retrieval in CI.
 - Do **not** add integration tests that download multi-GB datasets without maintainer approval.
 - Do **not** commit secrets (`.env`, API keys, VirBench private CSVs).
 

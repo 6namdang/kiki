@@ -63,5 +63,9 @@ def register_uniprot_search_tools(mcp) -> None:
                 f"Found {result['total_available']} UniProt entries. "
                 f"Returning {result['returned']} inline preview."
             ),
-            provenance_extra={"pagination_complete": result["pagination_complete"]},
+            provenance_extra={
+                "pagination_complete": result.get("pagination_complete"),
+                "pages_fetched": result.get("pages_fetched"),
+                "api_sequence": result.get("api_sequence"),
+            },
         )
